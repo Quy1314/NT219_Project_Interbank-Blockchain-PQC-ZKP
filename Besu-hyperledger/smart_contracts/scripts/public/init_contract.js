@@ -1,0 +1,170 @@
+const path = require('path');
+const fs = require('fs-extra');
+const ethers = require('ethers');
+
+// Contract address (đã deploy)
+// Có thể set qua environment variable: CONTRACT_ADDRESS
+// Hoặc sẽ được tự động set khi chạy deploy_and_init.js
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || '0x42699A7612A82f1d9C36148af9C77354759b210b';
+
+// RPC endpoint
+const host = process.env.RPC_ENDPOINT || "http://127.0.0.1:21001";
+
+// Deployer private key (owner của contract)
+const ownerPrivateKey = process.env.PRIVATE_KEY || "0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63";
+
+// Danh sách users cần deposit (addresses đúng từ private keys trong banks.ts)
+const USERS = [
+    // Vietcombank (addresses đã được cập nhật để match với private keys)
+    { address: '0x6423CfdF2B3E2E94613266631f22EA0e8788e34e', bankCode: 'VCB' },
+    { address: '0x1444808f0AfF7ec6008A416450Dd4e14069d436D', bankCode: 'VCB' },
+    // VietinBank
+    { address: '0x469Bb95e092005ba56a786fAAAE10BA38285E1c8', bankCode: 'VTB' },
+    { address: '0x2e27a0742fbbF51245b606DF46165e7eFa412b7C', bankCode: 'VTB' },
+    // BIDV
+    { address: '0x12B7D41e4Cf1f380a838067127a32E30B42b3e73', bankCode: 'BIDV' },
+    { address: '0x21f0e22d5974Ecd5EDC1efDF1135A39Ff1474E9D', bankCode: 'BIDV' },
+];
+
+// Số dư ban đầu: 100 triệu VND = 100 ETH (theo tỷ lệ 1 ETH = 1,000 VND)
+// 100,000,000 VND = 100 ETH = 100 * 10^18 wei
+const INITIAL_ETH_AMOUNT = ethers.parseEther('100'); // 100 ETH (tương đương 100 triệu VND)
+
+// Load contract ABI
+const contractJsonPath = path.resolve(__dirname, '../../', 'contracts', 'InterbankTransfer.json');
+const contractJson = JSON.parse(fs.readFileSync(contractJsonPath));
+const contractAbi = contractJson.abi;
+
+async function initializeContract() {
+    try {
+        console.log("Connecting to blockchain at:", host);
+        const provider = new ethers.JsonRpcProvider(host);
+        
+        // Kiểm tra kết nối
+        const network = await provider.getNetwork();
+        console.log(`✅ Connected to network: Chain ID ${network.chainId}`);
+        
+        const ownerWallet = new ethers.Wallet(ownerPrivateKey, provider);
+        console.log("Owner address:", ownerWallet.address);
+        
+        // Kiểm tra owner balance
+        const ownerBalance = await provider.getBalance(ownerWallet.address);
+        console.log("Owner balance:", ethers.formatEther(ownerBalance), "ETH");
+        
+        if (ownerBalance < INITIAL_ETH_AMOUNT * BigInt(USERS.length)) {
+            console.warn(`⚠️ Cảnh báo: Owner balance có thể không đủ để deposit cho ${USERS.length} users`);
+            console.warn(`   Cần: ${ethers.formatEther(INITIAL_ETH_AMOUNT * BigInt(USERS.length))} ETH`);
+        }
+        
+        // Get contract instance
+        const contract = new ethers.Contract(CONTRACT_ADDRESS, contractAbi, ownerWallet);
+        
+        // Verify contract is accessible
+        const contractOwner = await contract.owner();
+        console.log("Contract owner:", contractOwner);
+        
+        if (contractOwner.toLowerCase() !== ownerWallet.address.toLowerCase()) {
+            throw new Error(`Owner mismatch! Contract owner: ${contractOwner}, Wallet: ${ownerWallet.address}`);
+        }
+        
+        console.log("\n📋 Bước 1: Authorize bank addresses...");
+        // Lấy danh sách bank addresses duy nhất
+        const bankAddresses = [...new Set(USERS.map(u => {
+            // Lấy bank address từ user address (giả sử bank address là user address)
+            // Hoặc bạn có thể có mapping riêng
+            return u.address; // Tạm thời dùng user address làm bank address
+        }))];
+        
+        // Authorize các bank addresses
+        for (const user of USERS) {
+            try {
+                // Check if already authorized
+                const isAuthorized = await contract.authorizedBanks(user.address);
+                if (!isAuthorized) {
+                    console.log(`  Authorizing ${user.address} (${user.bankCode})...`);
+                    const tx = await contract.addAuthorizedBank(user.address, user.bankCode, {
+                        gasLimit: 15000000, // Max gas limit
+                        gasPrice: 0,
+                    });
+                    await tx.wait(1);
+                    console.log(`  ✅ Authorized ${user.address}`);
+                } else {
+                    console.log(`  ⏭️  ${user.address} already authorized`);
+                }
+            } catch (error) {
+                console.error(`  ❌ Error authorizing ${user.address}:`, error.message);
+            }
+        }
+        
+        console.log("\n📋 Bước 2: Deposit initial balance for all users...");
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const user of USERS) {
+            try {
+                // Check current balance
+                const currentBalance = await contract.getBalance(user.address);
+                
+                if (currentBalance > 0n) {
+                    console.log(`  ⏭️  ${user.address} already has balance: ${ethers.formatEther(currentBalance)} ETH`);
+                    continue;
+                }
+                
+                console.log(`  Depositing ${ethers.formatEther(INITIAL_ETH_AMOUNT)} ETH to ${user.address} (${user.bankCode})...`);
+                
+                // Deposit với số tiền kèm theo (payable function)
+                const tx = await contract.deposit(user.address, user.bankCode, {
+                    value: INITIAL_ETH_AMOUNT,
+                    gasLimit: 15000000, // Max gas limit
+                    gasPrice: 0,
+                });
+                
+                console.log(`    Transaction hash: ${tx.hash}`);
+                const receipt = await tx.wait(1);
+                
+                // Verify balance after deposit
+                const newBalance = await contract.getBalance(user.address);
+                console.log(`    ✅ Deposit successful! New balance: ${ethers.formatEther(newBalance)} ETH`);
+                successCount++;
+                
+            } catch (error) {
+                console.error(`    ❌ Error depositing to ${user.address}:`, error.message);
+                failCount++;
+            }
+        }
+        
+        console.log("\n✅ Initialization completed!");
+        console.log(`   Success: ${successCount}/${USERS.length}`);
+        console.log(`   Failed: ${failCount}/${USERS.length}`);
+        
+        // Verify all balances
+        console.log("\n📊 Final balances:");
+        for (const user of USERS) {
+            const balance = await contract.getBalance(user.address);
+            console.log(`   ${user.address.slice(0, 10)}... (${user.bankCode}): ${ethers.formatEther(balance)} ETH`);
+        }
+        
+    } catch (error) {
+        console.error("❌ Initialization failed:", error);
+        throw error;
+    }
+}
+
+async function main() {
+    await initializeContract()
+        .then(() => {
+            console.log("\n✅ Initialization script completed!");
+            process.exit(0);
+        })
+        .catch((error) => {
+            console.error("\n❌ Initialization script failed:", error.message);
+            process.exit(1);
+        });
+}
+
+if (require.main === module) {
+    main();
+}
+
+module.exports = { initializeContract };
+

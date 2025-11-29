@@ -9,7 +9,9 @@ export const WS_ENDPOINT = process.env.NEXT_PUBLIC_WS_ENDPOINT || 'ws://localhos
 export const CHAIN_ID = 1337;
 
 // Gas configuration
-export const GAS_LIMIT = 21000;
+// Block gas limit from genesis.json: 0xf7b760 = 16,243,360
+// Max transaction gas limit set to 15,000,000 (safe margin below block limit)
+export const GAS_LIMIT = 15000000; // Max gas limit for transactions
 export const GAS_PRICE = '0x0'; // Free gas for test network
 
 // Mock Mode: Set to true to enable mock transactions when blockchain balance is insufficient
@@ -18,24 +20,25 @@ export const GAS_PRICE = '0x0'; // Free gas for test network
 export const MOCK_MODE = true;
 
 // VND to Wei conversion
-// Genesis balance: 100,000 ETH = 100,000,000 VND (100 triệu)
-// So: 1 ETH = 1,000 VND for display purposes
+// Contract balance: 100 ETH = 100,000,000 VND (100 triệu) - mỗi user có 100 ETH trong contract
+// So: 1 ETH = 1,000,000 VND for display purposes
 export const WEI_TO_ETH = BigInt(10 ** 18);
-export const ETH_TO_VND_RATE = 1000; // 1 ETH = 1000 VND
-export const INITIAL_ETH_BALANCE = 100000; // 100,000 ETH from genesis
+export const ETH_TO_VND_RATE = 1000000; // 1 ETH = 1,000,000 VND (để 100 ETH = 100 triệu VND)
+export const INITIAL_ETH_BALANCE = 100; // 100 ETH trong contract (tương đương 100 triệu VND)
 export const INITIAL_VND_BALANCE = 100000000; // 100,000,000 VND (100 triệu)
 
 export const vndToWei = (vnd: number): bigint => {
-  // Convert VND to ETH: 100M VND = 100K ETH, so 1 VND = 0.001 ETH = 10^15 wei
-  const ethValue = (Number(vnd) / INITIAL_VND_BALANCE) * INITIAL_ETH_BALANCE;
-  return BigInt(Math.floor(ethValue * Number(WEI_TO_ETH)));
+  // Convert VND to ETH: 100M VND = 100 ETH, so 1 VND = 0.000001 ETH = 10^12 wei
+  // Formula: vnd / 1,000,000 = ETH, sau đó convert sang wei
+  const ethValue = Number(vnd) / ETH_TO_VND_RATE; // Convert VND to ETH
+  return BigInt(Math.floor(ethValue * Number(WEI_TO_ETH))); // Convert ETH to wei
 };
 
 export const weiToVnd = (wei: bigint): number => {
-  // Convert ETH to VND: 100K ETH = 100M VND
-  // Rate: 1 ETH = 1,000 VND for display
-  const ethValue = Number(wei) / Number(WEI_TO_ETH);
-  return Math.floor(ethValue * ETH_TO_VND_RATE);
+  // Convert Wei to ETH, sau đó convert ETH to VND
+  // Rate: 1 ETH = 1,000,000 VND
+  const ethValue = Number(wei) / Number(WEI_TO_ETH); // Convert wei to ETH
+  return Math.floor(ethValue * ETH_TO_VND_RATE); // Convert ETH to VND
 };
 
 export const formatVND = (amount: number): string => {
@@ -43,4 +46,25 @@ export const formatVND = (amount: number): string => {
     style: 'currency',
     currency: 'VND',
   }).format(amount);
+};
+
+// Blockchain Explorer URL (for local Besu network)
+// If you have a local explorer like Blockscout, update this URL
+export const getBlockchainExplorerUrl = (type: 'tx' | 'address' | 'block', value: string): string => {
+  // For local Besu network, you can use:
+  // - BlockScout: http://localhost:4000 (if installed)
+  // - Besu JSON-RPC directly: Not recommended for user-facing links
+  // - Custom explorer URL from env
+  const explorerBaseUrl = process.env.NEXT_PUBLIC_BLOCKCHAIN_EXPLORER_URL || 'http://localhost:4000';
+  
+  switch (type) {
+    case 'tx':
+      return `${explorerBaseUrl}/tx/${value}`;
+    case 'address':
+      return `${explorerBaseUrl}/address/${value}`;
+    case 'block':
+      return `${explorerBaseUrl}/block/${value}`;
+    default:
+      return '#';
+  }
 };

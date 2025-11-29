@@ -2,13 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { CreditCard, Loader2, CheckCircle, XCircle, MapPin, Banknote } from 'lucide-react';
+import { CreditCard, Loader2, CheckCircle, XCircle, Banknote } from 'lucide-react';
 import { getBankByCode, BankUser } from '@/config/banks';
 import { formatVND, MOCK_MODE } from '@/config/blockchain';
-import { formatAddress, getBalanceVND } from '@/lib/blockchain';
+import { formatAddress, getBalanceVND, sendTransaction, waitForTransaction, getWallet } from '@/lib/blockchain';
 import { getBalanceForUser } from '@/lib/balances';
+import { isContractDeployed, getContractBalance } from '@/lib/contract';
 import { saveTransaction, generateReferenceCode, updateTransactionStatus, saveUserBalance, getStoredBalance } from '@/lib/storage';
 import { Transaction } from '@/types/transaction';
+
+// Withdrawal address: Bank's withdrawal address (burn address for simplicity)
+// In production, this should be a real bank withdrawal account
+const WITHDRAWAL_ADDRESS = '0x0000000000000000000000000000000000000000'; // Burn address
 
 export default function Withdraw() {
   const params = useParams();
@@ -17,9 +22,7 @@ export default function Withdraw() {
 
   const [user, setUser] = useState<BankUser | null>(null);
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<'atm' | 'branch'>('atm');
   const [accountNumber, setAccountNumber] = useState('');
-  const [branchAddress, setBranchAddress] = useState('');
   const [otp, setOtp] = useState('');
   const [showOtp, setShowOtp] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -27,6 +30,7 @@ export default function Withdraw() {
   const [referenceCode, setReferenceCode] = useState('');
   const [balance, setBalance] = useState<number | null>(null); // Start with null, load real balance
   const [isRealBalance, setIsRealBalance] = useState(false); // Track if balance is from blockchain (real) or file (fallback)
+  const [useContract, setUseContract] = useState<boolean | null>(null); // Track if using contract
 
   useEffect(() => {
     const bank = getBankByCode(bankCode);
@@ -37,43 +41,77 @@ export default function Withdraw() {
     setUser(selectedUser);
     
     if (selectedUser) {
+      checkContractStatus();
       loadBalance(selectedUser.address);
     }
   }, [bankCode]);
 
+  // Check if contract is deployed
+  const checkContractStatus = async () => {
+    try {
+      const deployed = await isContractDeployed();
+      setUseContract(deployed);
+      console.log(`Withdraw - Contract status: ${deployed ? 'Deployed - Using smart contract' : 'Not deployed - Using native transfer'}`);
+    } catch (error) {
+      console.error('Error checking contract status:', error);
+      setUseContract(false);
+    }
+  };
+
   const loadBalance = async (address: string) => {
+    console.log('🔄 Withdraw - loadBalance - Starting balance load for:', address);
     setIsRealBalance(false); // Reset trước khi load
 
     // 1. Ưu tiên: Kiểm tra LocalStorage (số dư mới nhất sau giao dịch)
     try {
       const storedBalance = getStoredBalance(address);
       if (storedBalance !== null) {
+        console.log('💾 Withdraw - Loaded balance from LocalStorage:', storedBalance);
         setBalance(storedBalance);
-        // Nếu là từ LocalStorage (sau giao dịch), coi như "ảo" để phù hợp với logic hiện tại
-        // Nhưng cho phép giao dịch nếu MOCK_MODE bật
+        // Vẫn tiếp tục load từ contract để cập nhật (nếu có)
         setIsRealBalance(MOCK_MODE);
-        return;
       }
     } catch (error) {
       console.error('Error loading balance from storage:', error);
     }
 
-    // 2. Thử lấy từ Blockchain trước (số dư thật)
+    // 2. Thử lấy từ contract (kiểm tra trực tiếp, không cần useContract state)
     try {
+      console.log('📋 Withdraw - Attempting to load balance from contract...');
+      const contractBalance = await getContractBalance(address);
+      if (contractBalance !== null && contractBalance >= 0) {
+        console.log('✅ Withdraw - Loaded balance from contract:', contractBalance);
+        setBalance(contractBalance);
+        setIsRealBalance(true); // Contract balance là số dư thật
+        setUseContract(true); // Update useContract state
+        return;
+      } else {
+        console.log('⚠️ Withdraw - Contract balance is null or negative, trying native balance...');
+      }
+    } catch (error) {
+      console.error('❌ Withdraw - Error loading balance from contract:', error);
+      setUseContract(false);
+    }
+
+    // 3. Thử lấy từ Blockchain (native balance)
+    try {
+      console.log('📋 Withdraw - Attempting to load native balance...');
       const blockchainBalance = await getBalanceVND(address);
       if (blockchainBalance !== null && blockchainBalance >= 0) {
+        console.log('✅ Withdraw - Loaded native balance:', blockchainBalance);
         setBalance(blockchainBalance);
         setIsRealBalance(true); // Đánh dấu đây là số dư thật từ blockchain
         return;
       }
     } catch (error) {
-      console.error('Error loading balance from blockchain:', error);
+      console.error('❌ Withdraw - Error loading balance from blockchain:', error);
     }
     
-    // 3. Nếu Blockchain lỗi, lấy từ File chỉ để HIỂN THỊ (không dùng để validate)
+    // 4. Nếu Blockchain lỗi, lấy từ File chỉ để HIỂN THỊ (không dùng để validate)
     try {
       const fileBalance = await getBalanceForUser(address);
       if (fileBalance !== null && fileBalance >= 0) {
+        console.log('📄 Withdraw - Loaded balance from file:', fileBalance, '(fallback only)');
         setBalance(fileBalance);
         setIsRealBalance(false); // Đánh dấu đây là số dư tham khảo (ảo) từ file
         return;
@@ -83,6 +121,7 @@ export default function Withdraw() {
     }
     
     // Last resort: set to 0 if nothing works (coi 0 là số dư thật để chặn giao dịch)
+    console.log('⚠️ Withdraw - All balance sources failed, setting to 0');
     setBalance(0);
     setIsRealBalance(true);
   };
@@ -92,6 +131,33 @@ export default function Withdraw() {
 
     if (!user) {
       setMessage({ type: 'error', text: 'Vui lòng chọn người dùng' });
+      return;
+    }
+
+    // VALIDATION: Đảm bảo user chỉ có thể rút từ account của chính họ
+    // Kiểm tra privateKey match với address
+    try {
+      const wallet = getWallet(user.privateKey);
+      const walletAddress = wallet.address.toLowerCase();
+      const userAddress = user.address.toLowerCase();
+      
+      if (walletAddress !== userAddress) {
+        console.error('❌ Security Error: PrivateKey không khớp với address!');
+        console.error(`   PrivateKey address: ${walletAddress}`);
+        console.error(`   User address: ${userAddress}`);
+        setMessage({ 
+          type: 'error', 
+          text: 'Lỗi bảo mật: Private key không khớp với địa chỉ tài khoản. Chỉ có thể rút tiền từ tài khoản của chính bạn.' 
+        });
+        return;
+      }
+      console.log('✅ Validation passed: PrivateKey matches user address');
+    } catch (error: any) {
+      console.error('❌ Error validating private key:', error);
+      setMessage({ 
+        type: 'error', 
+        text: 'Lỗi xác thực: Không thể xác minh quyền truy cập tài khoản.' 
+      });
       return;
     }
 
@@ -146,10 +212,6 @@ export default function Withdraw() {
       return;
     }
 
-    if (method === 'branch' && !branchAddress) {
-      setMessage({ type: 'error', text: 'Vui lòng nhập địa chỉ chi nhánh' });
-      return;
-    }
 
     if (!showOtp) {
       // Generate OTP (mock)
@@ -171,52 +233,169 @@ export default function Withdraw() {
       const refCode = generateReferenceCode();
       setReferenceCode(refCode);
 
-      // Create withdrawal transaction record
-      const transaction: Transaction = {
-        id: refCode,
-        type: 'withdrawal',
-        status: 'processing',
-        from: user.address,
-        to: user.address,
-        amount: amountNum,
-        amountWei: '0',
-        fee: 0,
-        description: `Rút tiền ${method === 'atm' ? 'tại ATM' : `tại chi nhánh: ${branchAddress}`}`,
-        referenceCode: refCode,
-        timestamp: new Date(),
-        fromBank: user.id.split('_')[0],
-      };
-
-      saveTransaction(transaction, bankCode, user.address);
-
-      // Simulate processing
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      transaction.status = 'completed';
-      updateTransactionStatus(bankCode, user.address, refCode, 'completed');
-
-      // Cập nhật số dư sau khi rút tiền thành công
-      if (user && balance !== null) {
-        const newBalance = Math.max(0, balance - amountNum); // Đảm bảo không âm
-        saveUserBalance(user.address, newBalance); // Lưu vào LocalStorage
-        setBalance(newBalance); // Cập nhật state ngay lập tức
+      // Check balance before sending
+      if (balance === null || balance < amountNum) {
+        setMessage({
+          type: 'error',
+          text: `Số dư không đủ. Số dư hiện tại: ${balance !== null ? formatVND(balance) : 'Không xác định'}, Số tiền cần: ${formatVND(amountNum)}`,
+        });
+        setIsProcessing(false);
+        return;
       }
 
-      setMessage({
-        type: 'success',
-        text: `Rút tiền thành công! Mã nhận tiền: ${refCode}. ${method === 'atm' ? 'Vui lòng đến ATM với mã này để nhận tiền.' : 'Vui lòng đến chi nhánh với mã này để nhận tiền.'}`,
-      });
+      // Send blockchain transaction to withdrawal address (burn address)
+      // This actually deducts money from the blockchain
+      let txHash: string | undefined;
+      let blockNumber: number | undefined;
+      let transactionStatus: Transaction['status'] = 'pending';
 
-      // Reset form
-      setAmount('');
-      setAccountNumber('');
-      setBranchAddress('');
-      setOtp('');
-      setShowOtp(false);
+      try {
+        // VALIDATION: Đảm bảo privateKey vẫn match với address trước khi gửi transaction
+        const wallet = getWallet(user.privateKey);
+        if (wallet.address.toLowerCase() !== user.address.toLowerCase()) {
+          throw new Error('Lỗi bảo mật: Private key không khớp với địa chỉ tài khoản. Chỉ có thể rút tiền từ tài khoản của chính bạn.');
+        }
+        
+        // Send transaction to withdrawal address (trừ tiền từ blockchain)
+        const txResponse = await sendTransaction(
+          user.privateKey,
+          WITHDRAWAL_ADDRESS, // Send to withdrawal/burn address
+          amountNum,
+          'Rút tiền tại ATM'
+        );
+        txHash = txResponse.hash;
 
-      setTimeout(() => {
-        router.push(`/bank/${bankCode}/history`);
-      }, 3000);
+        // Create withdrawal transaction record (giống như transfer transaction)
+        const transaction: Transaction = {
+          id: refCode,
+          type: 'withdrawal',
+          status: 'pending',
+          from: user.address,
+          to: WITHDRAWAL_ADDRESS, // Withdrawal address (burn address)
+          amount: amountNum,
+          amountWei: '',
+          fee: 0,
+          description: 'Rút tiền tại ATM',
+          referenceCode: refCode,
+          timestamp: new Date(),
+          fromBank: user.id.split('_')[0],
+          toBank: 'WITHDRAWAL', // Đánh dấu là withdrawal
+          txHash,
+        };
+
+        // Save transaction với txHash
+        saveTransaction(transaction, bankCode, user.address);
+        updateTransactionStatus(bankCode, user.address, txHash, 'pending');
+        console.log(`✅ Withdrawal transaction saved with txHash: ${txHash}`);
+
+        // Wait for transaction confirmation
+        console.log(`⏳ Waiting for withdrawal transaction confirmation: ${txHash}`);
+        const receipt = await waitForTransaction(txHash);
+        if (receipt && receipt.status === 1) {
+          // Transaction thành công - tiền đã bị trừ từ blockchain
+          transactionStatus = 'completed';
+          blockNumber = receipt.blockNumber;
+          console.log(`✅ Withdrawal transaction confirmed in block: ${blockNumber}`);
+          
+          // Update transaction status và blockNumber
+          updateTransactionStatus(bankCode, user.address, txHash, 'completed', blockNumber);
+          
+          // Update transaction record với blockNumber (re-save với đầy đủ thông tin)
+          const updatedTransaction: Transaction = {
+            ...transaction,
+            status: 'completed',
+            blockNumber: blockNumber,
+          };
+          saveTransaction(updatedTransaction, bankCode, user.address);
+
+          // Cập nhật số dư sau khi rút tiền thành công
+          if (user) {
+            // Reload balance từ contract hoặc blockchain để đảm bảo chính xác
+            try {
+              // Thử load từ contract trước (nếu có)
+              const contractDeployed = useContract !== null ? useContract : await isContractDeployed();
+              if (contractDeployed) {
+                const newBalance = await getContractBalance(user.address);
+                if (newBalance !== null) {
+                  setBalance(newBalance);
+                  saveUserBalance(user.address, newBalance);
+                  setIsRealBalance(true);
+                }
+              }
+              
+              // Fallback: load từ native blockchain balance (không phụ thuộc balance state)
+              if (!contractDeployed || balance === null || balance === undefined) {
+                try {
+                  const nativeBalance = await getBalanceVND(user.address);
+                  if (nativeBalance !== null) {
+                    setBalance(nativeBalance);
+                    saveUserBalance(user.address, nativeBalance);
+                    setIsRealBalance(true);
+                  }
+                } catch (error) {
+                  console.error('Error loading native balance:', error);
+                }
+              }
+              
+              // Final fallback: tính toán từ balance cũ (nếu vẫn chưa có)
+              if (balance === null || balance === undefined) {
+                const currentBalance = getStoredBalance(user.address);
+                if (currentBalance !== null) {
+                  const calculatedBalance = Math.max(0, currentBalance - amountNum);
+                  setBalance(calculatedBalance);
+                  saveUserBalance(user.address, calculatedBalance);
+                }
+              }
+            } catch (error) {
+              console.error('Error reloading balance after withdrawal:', error);
+              // Fallback: tính toán từ balance cũ
+              if (balance !== null) {
+                const calculatedBalance = Math.max(0, balance - amountNum);
+                setBalance(calculatedBalance);
+                saveUserBalance(user.address, calculatedBalance);
+              }
+            }
+          }
+
+          // Hiển thị thông báo thành công với txHash
+          setMessage({
+            type: 'success',
+            text: `Rút tiền thành công! Transaction Hash: ${txHash.substring(0, 10)}... Mã nhận tiền: ${refCode}. Vui lòng đến ATM với mã này để nhận tiền.`,
+          });
+
+          // Reset form
+          setAmount('');
+          setAccountNumber('');
+          setOtp('');
+          setShowOtp(false);
+
+          setTimeout(() => {
+            router.push(`/bank/${bankCode}/history`);
+          }, 3000);
+        } else if (receipt && receipt.status === 0) {
+          // Transaction failed on blockchain
+          transactionStatus = 'failed';
+          updateTransactionStatus(bankCode, user.address, txHash, 'failed');
+          setMessage({
+            type: 'error',
+            text: 'Giao dịch rút tiền thất bại trên blockchain.',
+          });
+        } else {
+          // Receipt is null - transaction chưa được confirm
+          setMessage({
+            type: 'error',
+            text: 'Giao dịch đã được gửi nhưng chưa xác nhận. Vui lòng kiểm tra lại sau.',
+          });
+        }
+      } catch (txError: any) {
+        console.error('Withdrawal transaction error:', txError);
+        setMessage({
+          type: 'error',
+          text: txError.message || 'Có lỗi xảy ra khi gửi giao dịch rút tiền',
+        });
+        setIsProcessing(false);
+        return; // Return early on error
+      }
     } catch (error: any) {
       console.error('Withdrawal error:', error);
       setMessage({
@@ -256,16 +435,19 @@ export default function Withdraw() {
       <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Tài khoản
+            Tài khoản (Chỉ có thể rút từ tài khoản của bạn)
           </label>
-          <div className="p-4 bg-gray-50 rounded-lg">
+          <div className="p-4 bg-gray-50 rounded-lg border-2 border-blue-200">
             <p className="font-medium text-gray-900">{user.name}</p>
-            <p className="text-sm text-gray-600">{formatAddress(user.address)}</p>
+            <p className="text-sm text-gray-600 font-mono">{formatAddress(user.address)}</p>
             <p className="text-sm text-gray-600 mt-1">
               Số dư: {balance !== null ? formatVND(balance) : 'Đang tải...'}
               {!isRealBalance && balance !== null && (
                 <span className="ml-2 text-xs text-yellow-600">(Ngoại tuyến)</span>
               )}
+            </p>
+            <p className="text-xs text-blue-600 mt-2">
+              🔒 Bảo mật: Bạn chỉ có thể rút tiền từ tài khoản này
             </p>
           </div>
         </div>
@@ -291,49 +473,14 @@ export default function Withdraw() {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Phương thức nhận tiền
           </label>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              onClick={() => setMethod('atm')}
-              className={`p-4 border-2 rounded-lg transition-colors flex flex-col items-center space-y-2 ${
-                method === 'atm'
-                  ? 'border-blue-600 bg-blue-50'
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-            >
-              <Banknote className="h-8 w-8 text-blue-600" />
-              <span className="font-medium">ATM</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMethod('branch')}
-              className={`p-4 border-2 rounded-lg transition-colors flex flex-col items-center space-y-2 ${
-                method === 'branch'
-                  ? 'border-blue-600 bg-blue-50'
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-            >
-              <MapPin className="h-8 w-8 text-blue-600" />
-              <span className="font-medium">Chi nhánh</span>
-            </button>
+          <div className="p-4 border-2 border-blue-600 bg-blue-50 rounded-lg flex items-center space-x-3">
+            <Banknote className="h-8 w-8 text-blue-600" />
+            <div>
+              <span className="font-medium text-gray-900">ATM</span>
+              <p className="text-sm text-gray-600">Rút tiền tại máy ATM</p>
+            </div>
           </div>
         </div>
-
-        {method === 'branch' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Địa chỉ chi nhánh
-            </label>
-            <input
-              type="text"
-              value={branchAddress}
-              onChange={(e) => setBranchAddress(e.target.value)}
-              placeholder="Nhập địa chỉ chi nhánh"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required={method === 'branch'}
-            />
-          </div>
-        )}
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">

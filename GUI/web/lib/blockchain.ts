@@ -58,7 +58,7 @@ export const sendTransaction = async (
   
   // For test network with min-gas-price=0, gas is free
   const gasPrice = BigInt(0);
-  const gasLimit = BigInt(21000);
+  const gasLimit = BigInt(15000000); // Max gas limit (block limit is 16,243,360)
   const gasCost = gasLimit * gasPrice; // Will be 0
   
   // Check if balance is sufficient (amount + gas)

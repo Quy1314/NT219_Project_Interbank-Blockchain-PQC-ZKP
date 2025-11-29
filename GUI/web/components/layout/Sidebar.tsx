@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Send, CreditCard, History, FileText } from 'lucide-react';
+import { Home, Send, CreditCard, History, FileText, RefreshCw } from 'lucide-react';
 
 interface SidebarProps {
   bankCode: string;
@@ -14,6 +14,7 @@ const menuItems = [
   { icon: CreditCard, label: 'Rút tiền', href: '/withdraw' },
   { icon: History, label: 'Lịch sử', href: '/history' },
   { icon: FileText, label: 'Sao kê', href: '/statement' },
+  { icon: RefreshCw, label: 'Sync Blockchain', href: '/sync' },
 ];
 
 export default function Sidebar({ bankCode }: SidebarProps) {

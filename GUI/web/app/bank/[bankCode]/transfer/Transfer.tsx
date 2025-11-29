@@ -9,6 +9,8 @@ import { formatVND, MOCK_MODE } from '@/config/blockchain';
 import { getBalanceForUser } from '@/lib/balances';
 import { saveTransaction, updateTransactionStatus, generateReferenceCode, saveUserBalance, getStoredBalance } from '@/lib/storage';
 import { Transaction } from '@/types/transaction';
+import { isContractDeployed, transferViaContract, getContractBalance, getContract } from '@/lib/contract';
+import { getProvider } from '@/lib/blockchain';
 
 export default function Transfer() {
   const params = useParams();
@@ -26,6 +28,7 @@ export default function Transfer() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [balance, setBalance] = useState<number | null>(null); // Start with null, load real balance
   const [isRealBalance, setIsRealBalance] = useState(false); // Track if balance is from blockchain (real) or file (fallback)
+  const [useContract, setUseContract] = useState<boolean | null>(null); // Track if using contract or native transfer
 
   const allUsers = getAllUsers();
 
@@ -38,43 +41,78 @@ export default function Transfer() {
     setUser(selectedUser);
     
     if (selectedUser) {
+      // Check if contract is deployed
+      checkContractStatus();
       loadBalance(selectedUser.address);
     }
   }, [bankCode]);
 
+  // Check if contract is deployed
+  const checkContractStatus = async () => {
+    try {
+      const deployed = await isContractDeployed();
+      setUseContract(deployed);
+      console.log(`Contract status: ${deployed ? 'Deployed - Using smart contract' : 'Not deployed - Using native transfer'}`);
+    } catch (error) {
+      console.error('Error checking contract status:', error);
+      setUseContract(false);
+    }
+  };
+
   const loadBalance = async (address: string) => {
+    console.log('🔄 Transfer - loadBalance - Starting balance load for:', address);
     setIsRealBalance(false); // Reset trước khi load
 
     // 1. Ưu tiên: Kiểm tra LocalStorage (số dư mới nhất sau giao dịch)
     try {
       const storedBalance = getStoredBalance(address);
       if (storedBalance !== null) {
+        console.log('💾 Transfer - Loaded balance from LocalStorage:', storedBalance);
         setBalance(storedBalance);
-        // Nếu là từ LocalStorage (sau giao dịch), coi như "ảo" để phù hợp với logic hiện tại
-        // Nhưng cho phép giao dịch nếu MOCK_MODE bật
+        // Vẫn tiếp tục load từ contract để cập nhật (nếu có)
         setIsRealBalance(MOCK_MODE);
-        return;
       }
     } catch (error) {
       console.error('Error loading balance from storage:', error);
     }
 
-    // 2. Thử lấy từ Blockchain trước (số dư thật)
+    // 2. Thử lấy từ contract (kiểm tra trực tiếp, không cần useContract state)
     try {
+      console.log('📋 Transfer - Attempting to load balance from contract...');
+      const contractBalance = await getContractBalance(address);
+      if (contractBalance !== null && contractBalance >= 0) {
+        console.log('✅ Transfer - Loaded balance from contract:', contractBalance);
+        setBalance(contractBalance);
+        setIsRealBalance(true); // Contract balance là số dư thật
+        setUseContract(true); // Update useContract state
+        return;
+      } else {
+        console.log('⚠️ Transfer - Contract balance is null or negative, trying native balance...');
+      }
+    } catch (error) {
+      console.error('❌ Transfer - Error loading balance from contract:', error);
+      setUseContract(false);
+    }
+
+    // 3. Thử lấy từ Blockchain (native balance)
+    try {
+      console.log('📋 Transfer - Attempting to load native balance...');
       const blockchainBalance = await getBalanceVND(address);
       if (blockchainBalance !== null && blockchainBalance >= 0) {
+        console.log('✅ Transfer - Loaded native balance:', blockchainBalance);
         setBalance(blockchainBalance);
         setIsRealBalance(true); // Đánh dấu đây là số dư thật từ blockchain
         return;
       }
     } catch (error) {
-      console.error('Error loading balance from blockchain:', error);
+      console.error('❌ Transfer - Error loading balance from blockchain:', error);
     }
     
-    // 3. Nếu Blockchain lỗi, lấy từ File chỉ để HIỂN THỊ (không dùng để validate)
+    // 4. Nếu Blockchain lỗi, lấy từ File chỉ để HIỂN THỊ (không dùng để validate)
     try {
       const fileBalance = await getBalanceForUser(address);
       if (fileBalance !== null && fileBalance >= 0) {
+        console.log('📄 Transfer - Loaded balance from file:', fileBalance, '(fallback only)');
         setBalance(fileBalance);
         setIsRealBalance(false); // Đánh dấu đây là số dư tham khảo (ảo) từ file
         return;
@@ -84,6 +122,7 @@ export default function Transfer() {
     }
     
     // Last resort: set to 0 if nothing works (coi 0 là số dư thật để chặn giao dịch)
+    console.log('⚠️ Transfer - All balance sources failed, setting to 0');
     setBalance(0);
     setIsRealBalance(true);
   };
@@ -183,44 +222,98 @@ export default function Transfer() {
         return;
       }
 
-      // Send blockchain transaction TRƯỚC
-      const txResponse = await sendTransaction(
-        user.privateKey,
-        toAddress,
-        amountNum,
-        description
-      );
+      let txHash: string;
+      let txId: bigint | null = null;
+      let blockNumber: number | undefined;
+      let transactionStatus: Transaction['status'] = 'pending';
+
+      // Send transaction: Use contract if deployed, otherwise use native transfer
+      // Check contract status trước khi transfer (đảm bảo useContract đã được set)
+      const contractDeployed = useContract !== null ? useContract : await isContractDeployed();
+      
+      if (contractDeployed) {
+        // Use smart contract transfer
+        console.log('✅ Using smart contract for transfer...');
+        console.log('🔍 Transfer - User address:', user.address);
+        console.log('🔍 Transfer - User private key:', user.privateKey.substring(0, 10) + '...');
+        console.log('🔍 Transfer - To address:', toAddress);
+        console.log('🔍 Transfer - Amount VND:', amountNum);
+        try {
+          const contractResult = await transferViaContract(
+            user.privateKey,
+            toAddress,
+            amountNum,
+            finalToBank || 'EXTERNAL',
+            description
+          );
+          txHash = contractResult.txHash;
+          txId = contractResult.txId;
+          
+          // Contract transfer already waits for receipt, so transaction is confirmed
+          const provider = getProvider();
+          const receipt = await provider.getTransactionReceipt(txHash);
+          if (receipt && receipt.status === 1) {
+            blockNumber = receipt.blockNumber;
+            transactionStatus = 'completed';
+          } else if (receipt && receipt.status === 0) {
+            transactionStatus = 'failed';
+          }
+        } catch (contractError: any) {
+          console.error('Contract transfer error:', contractError);
+          throw new Error(`Lỗi khi chuyển tiền qua contract: ${contractError.message}`);
+        }
+      } else {
+        // Use native transfer (backward compatibility)
+        console.log('⚠️ Using native transfer (contract not deployed)...');
+        const txResponse = await sendTransaction(
+          user.privateKey,
+          toAddress,
+          amountNum,
+          description
+        );
+        txHash = txResponse.hash;
+      }
 
       // Tạo transaction record SAU KHI đã có txHash
+      // Description cho sender: giữ nguyên description từ input hoặc mặc định
+      const senderDescription = description || `Chuyển tiền đến ${formatAddress(toAddress)}`;
       const transaction: Transaction = {
-        id: referenceCode,
+        id: txId ? `TX-${txId.toString()}` : referenceCode, // Use contract txId if available
         type: 'transfer',
-        status: 'pending',
+        status: transactionStatus,
         from: user.address,
         to: toAddress,
         amount: amountNum,
         amountWei: '',
         fee,
-        description,
+        description: senderDescription, // Description cho sender
         referenceCode,
         timestamp: new Date(),
         fromBank: user.id.split('_')[0],
         toBank: finalToBank || 'EXTERNAL',
-        txHash: txResponse.hash, // Đã có txHash ngay từ đầu
+        txHash,
+        blockNumber,
       };
 
       // Lưu transaction với đầy đủ thông tin (có txHash)
       saveTransaction(transaction, bankCode, user.address);
-      updateTransactionStatus(bankCode, user.address, txResponse.hash, 'pending');
+      if (blockNumber) {
+        updateTransactionStatus(bankCode, user.address, txHash, transactionStatus, blockNumber);
+      } else {
+        updateTransactionStatus(bankCode, user.address, txHash, transactionStatus);
+      }
 
-      // Wait for confirmation
-      try {
-        const receipt = await waitForTransaction(txResponse.hash);
-        if (receipt && receipt.status === 1) {
-          // Transaction thành công
-          transaction.status = 'completed';
-          transaction.blockNumber = receipt.blockNumber;
-          updateTransactionStatus(bankCode, user.address, txResponse.hash, 'completed', receipt.blockNumber);
+      // Wait for confirmation (only for native transfer, contract already confirmed)
+      if (!useContract) {
+        try {
+          const receipt = await waitForTransaction(txHash);
+          if (receipt && receipt.status === 1) {
+            // Transaction thành công
+            transaction.status = 'completed';
+            transaction.blockNumber = receipt.blockNumber;
+            updateTransactionStatus(bankCode, user.address, txHash, 'completed', receipt.blockNumber);
+            blockNumber = receipt.blockNumber;
+            transactionStatus = 'completed';
           
           // Cập nhật số dư mới sau khi giao dịch thành công
           if (user && balance !== null) {
@@ -239,6 +332,38 @@ export default function Transfer() {
                 const receiverCurrentBalance = receiverBalance !== null ? receiverBalance : (receiverStoredBalance || 0);
                 const receiverNewBalance = receiverCurrentBalance + amountNum;
                 saveUserBalance(receiver.address, receiverNewBalance);
+                
+                // Tạo transaction record cho người nhận (native transfer)
+                const receiverBank = BANKS.find((b) => 
+                  b.users.some((u) => u.address.toLowerCase() === receiver.address.toLowerCase())
+                );
+                const receiverBankCode = receiverBank?.code || 'EXTERNAL';
+                
+                // Description cho receiver: khác với sender
+                const receiverDescription = description 
+                  ? `Nhận tiền từ ${user.name}: ${description}` 
+                  : `Nhận tiền từ ${user.name}`;
+                
+                const receiverTransaction: Transaction = {
+                  id: `${referenceCode}-RECEIVE`,
+                  type: 'transfer',
+                  status: 'completed',
+                  from: user.address,
+                  to: receiver.address,
+                  amount: amountNum,
+                  amountWei: '',
+                  fee: 0,
+                  description: receiverDescription, // Description riêng cho receiver
+                  referenceCode: referenceCode,
+                  timestamp: new Date(),
+                  fromBank: user.id.split('_')[0],
+                  toBank: receiverBankCode,
+                  txHash,
+                  blockNumber: receipt.blockNumber,
+                };
+                
+                saveTransaction(receiverTransaction, receiverBankCode, receiver.address);
+                console.log(`✅ Đã tạo transaction record cho người nhận (native transfer): ${receiver.address}`);
               } catch (error) {
                 console.error('Error updating receiver balance:', error);
                 // Nếu không lấy được balance của người nhận, tính toán dựa trên file
@@ -269,25 +394,126 @@ export default function Transfer() {
           }, 2000);
         } else if (receipt && receipt.status === 0) {
           // Transaction failed on blockchain
-          transaction.status = 'failed';
-          updateTransactionStatus(bankCode, user.address, txResponse.hash, 'failed');
-          setMessage({
-            type: 'error',
-            text: 'Giao dịch thất bại trên blockchain.',
-          });
+          transactionStatus = 'failed';
+          updateTransactionStatus(bankCode, user.address, txHash, 'failed');
         } else {
-          // Receipt is null - transaction chưa được confirm
-          setMessage({
-            type: 'error',
-            text: 'Giao dịch đã được gửi nhưng chưa xác nhận. Vui lòng kiểm tra lại sau.',
-          });
+          // Receipt is null - transaction chưa được confirm, keep as pending
         }
       } catch (waitError: any) {
         console.error('Error waiting for transaction:', waitError);
         // Nếu lỗi khi wait, giữ status là pending
+      }
+      }
+
+      // Handle success/failure for both contract and native transfer
+      if (transactionStatus === 'completed') {
+        // Cập nhật số dư mới sau khi giao dịch thành công
+        if (user && balance !== null) {
+          if (useContract) {
+            // Load balance từ contract
+            try {
+              const newBalance = await getContractBalance(user.address);
+              if (newBalance !== null) {
+                setBalance(newBalance);
+                saveUserBalance(user.address, newBalance);
+              }
+            } catch (error) {
+              console.error('Error loading balance from contract:', error);
+              const newBalance = Math.max(0, balance - amountNum);
+              setBalance(newBalance);
+              saveUserBalance(user.address, newBalance);
+            }
+          } else {
+            const newBalance = Math.max(0, balance - amountNum);
+            setBalance(newBalance);
+            saveUserBalance(user.address, newBalance);
+          }
+          
+          // Cập nhật số dư và tạo transaction record cho người nhận nếu họ trong hệ thống
+          const receiver = allUsers.find(
+            (u) => u.address.toLowerCase() === toAddress.toLowerCase()
+          );
+          if (receiver) {
+            try {
+              // Tìm bankCode của receiver
+              const receiverBank = BANKS.find((b) => 
+                b.users.some((u) => u.address.toLowerCase() === receiver.address.toLowerCase())
+              );
+              const receiverBankCode = receiverBank?.code || 'EXTERNAL';
+
+              // Cập nhật balance
+              if (useContract) {
+                const receiverBalance = await getContractBalance(receiver.address);
+                if (receiverBalance !== null) {
+                  saveUserBalance(receiver.address, receiverBalance);
+                }
+              } else {
+                const receiverBalance = await getBalanceVND(receiver.address);
+                const receiverStoredBalance = getStoredBalance(receiver.address);
+                const receiverCurrentBalance = receiverBalance !== null ? receiverBalance : (receiverStoredBalance || 0);
+                const receiverNewBalance = receiverCurrentBalance + amountNum;
+                saveUserBalance(receiver.address, receiverNewBalance);
+              }
+
+              // Tạo transaction record cho người nhận (ghi nhận tiền vào)
+              // Description cho receiver: khác với sender, thêm context về người gửi
+              const receiverDescription = description 
+                ? `Nhận tiền từ ${user.name}: ${description}` 
+                : `Nhận tiền từ ${user.name}`;
+              
+              const receiverTransaction: Transaction = {
+                id: txId ? `TX-${txId.toString()}-RECEIVE` : `${referenceCode}-RECEIVE`,
+                type: 'transfer', // Cũng là type 'transfer' nhưng với vai trò là người nhận
+                status: 'completed',
+                from: user.address, // Người gửi
+                to: receiver.address, // Người nhận
+                amount: amountNum,
+                amountWei: '',
+                fee: 0,
+                description: receiverDescription, // Description riêng cho receiver
+                referenceCode: referenceCode, // Cùng reference code với sender
+                timestamp: new Date(),
+                fromBank: user.id.split('_')[0], // Bank của người gửi
+                toBank: receiverBankCode, // Bank của người nhận
+                txHash, // Cùng txHash với transaction của sender
+                blockNumber,
+              };
+
+              // Lưu transaction vào lịch sử của người nhận
+              saveTransaction(receiverTransaction, receiverBankCode, receiver.address);
+              console.log(`✅ Đã tạo transaction record cho người nhận: ${receiver.address}`);
+            } catch (error) {
+              console.error('Error updating receiver balance and transaction:', error);
+            }
+          }
+        }
+        
+        setMessage({
+          type: 'success',
+          text: `Chuyển tiền thành công! ${txId ? `Transaction ID: ${txId}` : `Mã tham chiếu: ${referenceCode}`}`,
+        });
+        
+        // Reset form
+        setToAddress('');
+        setAmount('');
+        setDescription('');
+        setOtp('');
+        setShowOtp(false);
+        
+        // Redirect to history after 2 seconds
+        setTimeout(() => {
+          router.push(`/bank/${bankCode}/history`);
+        }, 2000);
+      } else if (transactionStatus === 'failed') {
         setMessage({
           type: 'error',
-          text: 'Giao dịch đã được gửi nhưng gặp lỗi khi xác nhận. Vui lòng kiểm tra lại sau.',
+          text: 'Giao dịch thất bại trên blockchain.',
+        });
+      } else {
+        // Status is still pending
+        setMessage({
+          type: 'error',
+          text: 'Giao dịch đã được gửi nhưng chưa xác nhận. Vui lòng kiểm tra lại sau.',
         });
       }
     } catch (error: any) {

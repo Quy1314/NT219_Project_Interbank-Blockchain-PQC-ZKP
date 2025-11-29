@@ -8,6 +8,7 @@ import { getBalanceVND, formatAddress } from '@/lib/blockchain';
 import { formatVND } from '@/config/blockchain';
 import { getTransactionsByUser, getStoredBalance } from '@/lib/storage';
 import { loadBalances, getBalanceForUser } from '@/lib/balances';
+import { isContractDeployed, getContractBalance, listenToTransferEvents } from '@/lib/contract';
 
 export default function Dashboard() {
   const params = useParams();
@@ -17,6 +18,7 @@ export default function Dashboard() {
   const [balance, setBalance] = useState<number | null>(null); // Start with null, load real balance
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [useContract, setUseContract] = useState<boolean | null>(null);
 
   useEffect(() => {
     const bank = getBankByCode(bankCode);
@@ -27,15 +29,73 @@ export default function Dashboard() {
     const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
     setUser(selectedUser);
 
+    // Check if contract is deployed
+    checkContractStatus();
+
     // Load balance - load real balance, don't show fake default
     if (selectedUser) {
       // Load from file first (fast)
       loadBalanceFromFile(selectedUser.address);
       
-      // Then try blockchain to get real-time balance
+      // Then try contract/blockchain to get real-time balance
       loadBalance(selectedUser.address);
     }
+
+    // Set up event listener for contract events (if contract is deployed)
+    let cleanupListener: (() => void) | undefined;
+    
+    const setupEventListener = async (userAddress: string) => {
+      try {
+        const deployed = await isContractDeployed();
+        if (!deployed) return;
+
+        // Listen to Transfer events
+        const cleanup = listenToTransferEvents((event) => {
+          // Only update if event involves current user
+          if (
+            event.from.toLowerCase() === userAddress.toLowerCase() ||
+            event.to.toLowerCase() === userAddress.toLowerCase()
+          ) {
+            console.log('📢 Contract Transfer event received:', event);
+            
+            // Reload balance when transaction involves this user
+            loadBalance(userAddress);
+          }
+        });
+
+        return cleanup;
+      } catch (error) {
+        console.error('Error setting up event listener:', error);
+        return undefined;
+      }
+    };
+
+    if (selectedUser) {
+      setupEventListener(selectedUser.address).then((cleanup) => {
+        if (cleanup) {
+          cleanupListener = cleanup;
+        }
+      });
+    }
+
+    // Cleanup listener on unmount or user change
+    return () => {
+      if (cleanupListener) {
+        cleanupListener();
+      }
+    };
   }, [bankCode]);
+
+  // Check if contract is deployed
+  const checkContractStatus = async () => {
+    try {
+      const deployed = await isContractDeployed();
+      setUseContract(deployed);
+    } catch (error) {
+      console.error('Error checking contract status:', error);
+      setUseContract(false);
+    }
+  };
 
   // Load balance from file first (fast fallback)
   const loadBalanceFromFile = async (address: string) => {
@@ -52,54 +112,59 @@ export default function Dashboard() {
   };
 
   const loadBalance = async (address: string) => {
-    setIsLoading(true);
-    setError(null);
+    console.log('🔄 loadBalance - Starting balance load for:', address);
     
     // 1. Ưu tiên: Kiểm tra LocalStorage (số dư mới nhất sau giao dịch)
     try {
       const storedBalance = getStoredBalance(address);
       if (storedBalance !== null) {
+        console.log('💾 Loaded balance from LocalStorage:', storedBalance);
         setBalance(storedBalance);
-        setError(null);
         setIsLoading(false);
-        return; // Dùng luôn số này để khớp với giao dịch
+        // Vẫn tiếp tục load từ contract để cập nhật (nếu có)
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading balance from storage:', error);
     }
 
-    // 2. Thử lấy từ Blockchain
+    // 2. Thử lấy từ contract (kiểm tra trực tiếp, không cần useContract state)
     try {
-      const balanceVND = await getBalanceVND(address);
-      if (balanceVND !== null && balanceVND >= 0) {
-        setBalance(balanceVND);
-        setError(null); // Success - clear any previous error
+      console.log('📋 Attempting to load balance from contract...');
+      const contractBalance = await getContractBalance(address);
+      if (contractBalance !== null && contractBalance >= 0) {
+        console.log('✅ Loaded balance from contract:', contractBalance);
+        setBalance(contractBalance);
+        setIsLoading(false);
+        // Update useContract state
+        setUseContract(true);
+        return;
+      } else {
+        console.log('⚠️ Contract balance is null or negative, trying native balance...');
+      }
+    } catch (error) {
+      console.error('❌ Error loading balance from contract:', error);
+      setUseContract(false);
+    }
+
+    // 3. Thử lấy từ Blockchain (native balance)
+    try {
+      console.log('📋 Attempting to load native balance...');
+      const blockchainBalance = await getBalanceVND(address);
+      if (blockchainBalance !== null && blockchainBalance >= 0) {
+        console.log('✅ Loaded native balance:', blockchainBalance);
+        setBalance(blockchainBalance);
         setIsLoading(false);
         return;
       }
-    } catch (error: any) {
-      console.error('Error loading balance from blockchain:', error);
-      // Continue to file fallback
+    } catch (error) {
+      console.error('❌ Error loading balance from blockchain:', error);
     }
     
-    // 3. Blockchain unavailable or failed - try file balance (getBalanceForUser cũng sẽ check LocalStorage)
-    try {
-      const fileBalance = await getBalanceForUser(address);
-      if (fileBalance !== null && fileBalance >= 0) {
-        setBalance(fileBalance);
-        setError('Không thể kết nối đến blockchain. Đang sử dụng số dư từ file.');
-        setIsLoading(false);
-        return;
-      }
-    } catch (error: any) {
-      console.error('Error loading balance from file:', error);
-    }
-    
-    // Last resort: set to 0 if nothing works (don't show fake balance)
-    setBalance(0);
-    setError('Không thể tải số dư. Vui lòng kiểm tra kết nối mạng.');
+    // 4. Nếu tất cả đều fail, giữ balance từ file hoặc LocalStorage (nếu đã load)
+    console.log('⚠️ All balance sources failed, keeping existing balance');
     setIsLoading(false);
   };
+
 
   const transactions = user ? getTransactionsByUser(bankCode, user.address) : [];
   const recentTransactions = transactions.slice(0, 5);
@@ -195,14 +260,26 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div className="text-right">
-                  <p
-                    className={`font-bold ${
-                      tx.type === 'transfer' ? 'text-red-600' : 'text-blue-600'
-                    }`}
-                  >
-                    {tx.type === 'transfer' ? '-' : '+'}
-                    {formatVND(tx.amount)}
-                  </p>
+                  {(() => {
+                    // Phân biệt gửi tiền hay nhận tiền
+                    const isSender = user && tx.from.toLowerCase() === user.address.toLowerCase();
+                    const isReceiver = user && tx.to.toLowerCase() === user.address.toLowerCase();
+                    const isOutgoing = tx.type === 'transfer' && isSender;
+                    const isIncoming = tx.type === 'transfer' && isReceiver;
+                    
+                    return (
+                      <p
+                        className={`font-bold ${
+                          isOutgoing || tx.type === 'withdrawal'
+                            ? 'text-red-600' // Gửi tiền hoặc rút tiền (trừ tiền)
+                            : 'text-green-600' // Nhận tiền (cộng tiền)
+                        }`}
+                      >
+                        {isOutgoing || tx.type === 'withdrawal' ? '-' : '+'}
+                        {formatVND(tx.amount)}
+                      </p>
+                    );
+                  })()}
                   <span
                     className={`inline-block px-2 py-1 rounded text-xs ${
                       tx.status === 'completed'

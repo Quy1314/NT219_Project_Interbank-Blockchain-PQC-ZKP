@@ -9,15 +9,35 @@ const STORAGE_KEYS = {
 };
 
 // Get storage key for a specific user (using bank and address as identifier)
-const getUserTransactionsKey = (bankCode: string, address: string): string => {
+export const getUserTransactionsKey = (bankCode: string, address: string): string => {
   return `${STORAGE_KEYS.TRANSACTIONS_PREFIX}${bankCode.toLowerCase()}_${address.toLowerCase()}`;
 };
 
 export const saveTransaction = (transaction: Transaction, bankCode: string, userAddress: string): void => {
   const userKey = getUserTransactionsKey(bankCode, userAddress);
   const transactions = getTransactionsByUser(bankCode, userAddress);
-  transactions.unshift(transaction);
-  localStorage.setItem(userKey, JSON.stringify(transactions));
+  
+  // Check for duplicate transaction
+  // Duplicate is defined as: same id, same from, same to, same timestamp (within 1 second), same txHash (if exists)
+  const isDuplicate = transactions.some((tx) => {
+    const sameId = tx.id === transaction.id;
+    const sameFrom = tx.from.toLowerCase() === transaction.from.toLowerCase();
+    const sameTo = tx.to.toLowerCase() === transaction.to.toLowerCase();
+    const sameTxHash = (tx.txHash && transaction.txHash && tx.txHash === transaction.txHash) || 
+                       (!tx.txHash && !transaction.txHash);
+    const sameTimestamp = Math.abs(tx.timestamp.getTime() - transaction.timestamp.getTime()) < 1000; // Within 1 second
+    
+    // If all match, it's a duplicate
+    return sameId && sameFrom && sameTo && sameTimestamp && sameTxHash;
+  });
+  
+  // Only add if not duplicate
+  if (!isDuplicate) {
+    transactions.unshift(transaction);
+    localStorage.setItem(userKey, JSON.stringify(transactions));
+  } else {
+    console.log(`⚠️ Duplicate transaction skipped: ${transaction.id}`, transaction);
+  }
 };
 
 export const getTransactions = (): Transaction[] => {
@@ -67,7 +87,8 @@ export const updateTransactionStatus = (
   userAddress: string,
   txHashOrId: string,
   status: Transaction['status'],
-  blockNumber?: number
+  blockNumber?: number,
+  newTxHash?: string
 ): void => {
   const transactions = getTransactionsByUser(bankCode, userAddress);
   const index = transactions.findIndex(
@@ -77,6 +98,9 @@ export const updateTransactionStatus = (
     transactions[index].status = status;
     if (blockNumber) {
       transactions[index].blockNumber = blockNumber;
+    }
+    if (newTxHash) {
+      transactions[index].txHash = newTxHash;
     }
     const userKey = getUserTransactionsKey(bankCode, userAddress);
     localStorage.setItem(userKey, JSON.stringify(transactions));

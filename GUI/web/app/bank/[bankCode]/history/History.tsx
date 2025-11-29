@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { Search, ExternalLink, CheckCircle, Clock, XCircle, Trash2, AlertCircle } from 'lucide-react';
+import { Search, ExternalLink, CheckCircle, Clock, XCircle, Trash2, AlertCircle, Copy, X, RefreshCw } from 'lucide-react';
 import { getBankByCode, BankUser } from '@/config/banks';
 import { formatAddress } from '@/lib/blockchain';
-import { formatVND } from '@/config/blockchain';
+import { formatVND, getBlockchainExplorerUrl } from '@/config/blockchain';
 import { getTransactionsByUser, deleteTransactionsByUser, deleteTransaction } from '@/lib/storage';
 import { Transaction, TransactionType, TransactionStatus } from '@/types/transaction';
 import { format } from 'date-fns';
@@ -27,6 +27,10 @@ export default function History() {
   });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     const bank = getBankByCode(bankCode);
@@ -35,13 +39,72 @@ export default function History() {
     const savedUserId = localStorage.getItem('interbank_selected_user');
     const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
     setUser(selectedUser);
-
-    if (selectedUser) {
-      const userTransactions = getTransactionsByUser(bankCode, selectedUser.address);
-      setTransactions(userTransactions);
-      setFilteredTransactions(userTransactions);
-    }
   }, [bankCode]);
+
+  // Function to load transactions and remove duplicates
+  const loadTransactions = () => {
+    if (!user) return;
+    
+    setIsSyncing(true);
+    try {
+      const userTransactions = getTransactionsByUser(bankCode, user.address);
+      
+      // Remove duplicates based on id, from, to, timestamp, and txHash
+      // Use a Map to track unique transactions
+      const uniqueTransactionsMap = new Map<string, Transaction>();
+      
+      userTransactions.forEach((tx) => {
+        // Create a unique key for this transaction
+        const uniqueKey = `${tx.id}-${tx.from}-${tx.to}-${tx.timestamp.getTime()}-${tx.txHash || ''}`;
+        
+        // If we haven't seen this exact transaction, add it
+        // If we have, prefer the one with more complete information (has txHash, blockNumber, etc.)
+        if (!uniqueTransactionsMap.has(uniqueKey)) {
+          uniqueTransactionsMap.set(uniqueKey, tx);
+        } else {
+          const existing = uniqueTransactionsMap.get(uniqueKey)!;
+          // Prefer transaction with more complete info (txHash, blockNumber, completed status)
+          if ((tx.txHash && !existing.txHash) || 
+              (tx.blockNumber && !existing.blockNumber) ||
+              (tx.status === 'completed' && existing.status !== 'completed')) {
+            uniqueTransactionsMap.set(uniqueKey, tx);
+          }
+        }
+      });
+      
+      // Convert Map values back to array and sort by timestamp (newest first)
+      const uniqueTransactions = Array.from(uniqueTransactionsMap.values())
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      
+      setTransactions(uniqueTransactions);
+      setFilteredTransactions(uniqueTransactions);
+      setLastSyncTime(new Date());
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Auto-sync every 5 seconds
+  useEffect(() => {
+    if (!user) return;
+
+    // Initial load
+    loadTransactions();
+
+    // Set up interval to sync every 5 seconds
+    const syncInterval = setInterval(() => {
+      if (user) {
+        loadTransactions(); // Use the same deduplication logic
+      }
+    }, 5000); // 5 seconds
+
+    // Cleanup interval on unmount or user change
+    return () => {
+      clearInterval(syncInterval);
+    };
+  }, [bankCode, user]);
 
   useEffect(() => {
     let filtered = [...transactions];
@@ -140,7 +203,18 @@ export default function History() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Lịch sử giao dịch</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold text-gray-900">Lịch sử giao dịch</h2>
+          <div className="flex items-center space-x-3 text-sm text-gray-500">
+            <RefreshCw 
+              className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} 
+              title={isSyncing ? 'Đang đồng bộ...' : 'Tự động đồng bộ mỗi 5 giây'}
+            />
+            <span>
+              {isSyncing ? 'Đang đồng bộ...' : `Cập nhật lúc: ${lastSyncTime.toLocaleTimeString('vi-VN')}`}
+            </span>
+          </div>
+        </div>
         {transactions.length > 0 && (
           <button
             onClick={() => confirmDelete('all')}
@@ -250,8 +324,8 @@ export default function History() {
           </div>
         ) : (
           <div className="divide-y divide-gray-200">
-            {filteredTransactions.map((tx) => (
-              <div key={tx.id} className="p-6 hover:bg-gray-50 transition-colors group">
+            {filteredTransactions.map((tx, index) => (
+              <div key={`${tx.id}-${tx.from}-${tx.to}-${tx.timestamp.getTime()}-${index}`} className="p-6 hover:bg-gray-50 transition-colors group">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-2">
@@ -271,11 +345,17 @@ export default function History() {
                         <span
                           className={`px-2 py-1 rounded text-xs font-medium ${
                             tx.type === 'transfer'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-purple-100 text-purple-700'
+                              ? user && tx.from.toLowerCase() === user.address.toLowerCase()
+                                ? 'bg-red-100 text-red-700' // Gửi tiền
+                                : 'bg-green-100 text-green-700' // Nhận tiền
+                              : 'bg-purple-100 text-purple-700' // Rút tiền
                           }`}
                         >
-                          {tx.type === 'transfer' ? 'Chuyển tiền' : 'Rút tiền'}
+                          {tx.type === 'transfer'
+                            ? user && tx.from.toLowerCase() === user.address.toLowerCase()
+                              ? 'Chuyển tiền đi'
+                              : 'Nhận tiền'
+                            : 'Rút tiền'}
                         </span>
                       </div>
                       <button
@@ -299,10 +379,19 @@ export default function History() {
                       </div>
                       {tx.type === 'transfer' && (
                         <>
-                          <div>
-                            <p className="text-sm text-gray-500">Người nhận</p>
-                            <p className="font-medium text-gray-900">{formatAddress(tx.to)}</p>
-                          </div>
+                          {user && tx.from.toLowerCase() === user.address.toLowerCase() ? (
+                            // Gửi tiền đi - hiển thị người nhận
+                            <div>
+                              <p className="text-sm text-gray-500">Người nhận</p>
+                              <p className="font-medium text-gray-900">{formatAddress(tx.to)}</p>
+                            </div>
+                          ) : (
+                            // Nhận tiền - hiển thị người gửi
+                            <div>
+                              <p className="text-sm text-gray-500">Người gửi</p>
+                              <p className="font-medium text-gray-900">{formatAddress(tx.from)}</p>
+                            </div>
+                          )}
                           <div>
                             <p className="text-sm text-gray-500">Nội dung</p>
                             <p className="font-medium text-gray-900">
@@ -310,6 +399,28 @@ export default function History() {
                             </p>
                           </div>
                         </>
+                      )}
+                      {tx.type === 'withdrawal' && (
+                        <>
+                          <div>
+                            <p className="text-sm text-gray-500">Phương thức</p>
+                            <p className="font-medium text-gray-900">ATM</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Nội dung</p>
+                            <p className="font-medium text-gray-900">
+                              {tx.description || 'Rút tiền tại ATM'}
+                            </p>
+                          </div>
+                        </>
+                      )}
+                      {tx.txHash && (
+                        <div>
+                          <p className="text-sm text-gray-500">Transaction Hash</p>
+                          <code className="text-xs font-mono text-gray-700 break-all">
+                            {tx.txHash.substring(0, 20)}...
+                          </code>
+                        </div>
                       )}
                       {tx.blockNumber && (
                         <div>
@@ -320,24 +431,52 @@ export default function History() {
                     </div>
                   </div>
                   <div className="text-right ml-4">
-                    <p
-                      className={`text-2xl font-bold mb-2 ${
-                        tx.type === 'transfer' ? 'text-red-600' : 'text-blue-600'
-                      }`}
-                    >
-                      {tx.type === 'transfer' ? '-' : '+'}
-                      {formatVND(tx.amount)}
-                    </p>
+                    {(() => {
+                      // Phân biệt gửi tiền hay nhận tiền
+                      const isSender = user && tx.from.toLowerCase() === user.address.toLowerCase();
+                      const isReceiver = user && tx.to.toLowerCase() === user.address.toLowerCase();
+                      const isOutgoing = tx.type === 'transfer' && isSender;
+                      const isIncoming = tx.type === 'transfer' && isReceiver;
+                      const isWithdrawal = tx.type === 'withdrawal';
+                      
+                      return (
+                        <p
+                          className={`text-2xl font-bold mb-2 ${
+                            isOutgoing || isWithdrawal
+                              ? 'text-red-600' // Gửi tiền hoặc rút tiền (trừ tiền)
+                              : 'text-green-600' // Nhận tiền (cộng tiền)
+                          }`}
+                        >
+                          {isOutgoing || isWithdrawal ? '-' : '+'}
+                          {formatVND(tx.amount)}
+                        </p>
+                      );
+                    })()}
                     {tx.txHash && (
-                      <a
-                        href="#"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-blue-600 hover:text-blue-700 flex items-center space-x-1"
-                      >
-                        <span>Xem trên blockchain</span>
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => setSelectedTx(tx)}
+                          className="text-sm text-blue-600 hover:text-blue-700 flex items-center space-x-1"
+                        >
+                          <span>Chi tiết transaction</span>
+                          <ExternalLink className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(tx.txHash);
+                              setCopied(tx.txHash);
+                              setTimeout(() => setCopied(null), 2000);
+                            } catch (err) {
+                              console.error('Failed to copy:', err);
+                            }
+                          }}
+                          className="text-xs text-gray-600 hover:text-gray-700 flex items-center space-x-1"
+                        >
+                          <Copy className="h-3 w-3" />
+                          <span>{copied === tx.txHash ? 'Đã copy!' : 'Copy txHash'}</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -346,6 +485,209 @@ export default function History() {
           </div>
         )}
       </div>
+
+      {/* Transaction Detail Modal */}
+      {selectedTx && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold text-gray-900">Chi tiết Transaction</h3>
+                <button
+                  onClick={() => setSelectedTx(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Status */}
+                <div className="flex items-center space-x-2">
+                  {getStatusIcon(selectedTx.status)}
+                  <span className={`px-3 py-1 rounded text-sm font-medium ${
+                    selectedTx.status === 'completed'
+                      ? 'bg-green-100 text-green-700'
+                      : selectedTx.status === 'pending' || selectedTx.status === 'processing'
+                      ? 'bg-yellow-100 text-yellow-700'
+                      : 'bg-red-100 text-red-700'
+                  }`}>
+                    {getStatusText(selectedTx.status)}
+                  </span>
+                  <span className={`px-3 py-1 rounded text-sm font-medium ${
+                    selectedTx.type === 'transfer'
+                      ? user && selectedTx.from.toLowerCase() === user.address.toLowerCase()
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-green-100 text-green-700'
+                      : 'bg-purple-100 text-purple-700'
+                  }`}>
+                    {selectedTx.type === 'transfer'
+                      ? user && selectedTx.from.toLowerCase() === user.address.toLowerCase()
+                        ? 'Chuyển tiền đi'
+                        : 'Nhận tiền'
+                      : 'Rút tiền'}
+                  </span>
+                </div>
+
+                {/* Amount */}
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">Số tiền</p>
+                  <p className={`text-2xl font-bold ${
+                    (user && selectedTx.from.toLowerCase() === user.address.toLowerCase()) || selectedTx.type === 'withdrawal'
+                      ? 'text-red-600'
+                      : 'text-green-600'
+                  }`}>
+                    {(user && selectedTx.from.toLowerCase() === user.address.toLowerCase()) || selectedTx.type === 'withdrawal' ? '-' : '+'}
+                    {formatVND(selectedTx.amount)}
+                  </p>
+                </div>
+
+                {/* Transaction Hash */}
+                {selectedTx.txHash && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Transaction Hash</p>
+                    <div className="flex items-center space-x-2">
+                      <code className="flex-1 bg-gray-100 p-2 rounded text-sm font-mono break-all">
+                        {selectedTx.txHash}
+                      </code>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(selectedTx.txHash!);
+                            setCopied(selectedTx.txHash!);
+                            setTimeout(() => setCopied(null), 2000);
+                          } catch (err) {
+                            console.error('Failed to copy:', err);
+                          }
+                        }}
+                        className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center space-x-1"
+                      >
+                        <Copy className="h-4 w-4" />
+                        <span>{copied === selectedTx.txHash ? 'Đã copy!' : 'Copy'}</span>
+                      </button>
+                      <a
+                        href={getBlockchainExplorerUrl('tx', selectedTx.txHash)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center space-x-1"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        <span>Xem trên explorer</span>
+                      </a>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      💡 Sử dụng txHash này để kiểm tra trên blockchain với script: 
+                      <code className="ml-1 bg-gray-100 px-1 rounded">node scripts/public/check_transaction.js {selectedTx.txHash.substring(0, 20)}...</code>
+                    </p>
+                  </div>
+                )}
+
+                {/* Grid Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Mã tham chiếu</p>
+                    <p className="font-medium">{selectedTx.referenceCode}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Thời gian</p>
+                    <p className="font-medium">
+                      {format(selectedTx.timestamp, 'dd/MM/yyyy HH:mm:ss', { locale: vi })}
+                    </p>
+                  </div>
+                  {selectedTx.blockNumber && (
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Block Number</p>
+                      <div className="flex items-center space-x-2">
+                        <p className="font-medium">{selectedTx.blockNumber}</p>
+                        <a
+                          href={getBlockchainExplorerUrl('block', selectedTx.blockNumber.toString())}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-700"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* From/To */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Từ</p>
+                    <div className="flex items-center space-x-2">
+                      <code className="font-mono text-sm">{formatAddress(selectedTx.from)}</code>
+                      <a
+                        href={getBlockchainExplorerUrl('address', selectedTx.from)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Đến</p>
+                    <div className="flex items-center space-x-2">
+                      <code className="font-mono text-sm">{formatAddress(selectedTx.to)}</code>
+                      <a
+                        href={getBlockchainExplorerUrl('address', selectedTx.to)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Description */}
+                {selectedTx.description && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Nội dung</p>
+                    <p className="font-medium">{selectedTx.description}</p>
+                  </div>
+                )}
+
+                {/* Withdrawal specific info */}
+                {selectedTx.type === 'withdrawal' && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Phương thức rút tiền</p>
+                    <p className="font-medium">ATM</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Tiền đã được trừ từ tài khoản và gửi đến địa chỉ withdrawal
+                    </p>
+                  </div>
+                )}
+
+                {/* Bank Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Ngân hàng gửi</p>
+                    <p className="font-medium">{selectedTx.fromBank || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Ngân hàng nhận</p>
+                    <p className="font-medium">{selectedTx.toBank || 'N/A'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setSelectedTx(null)}
+                  className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
