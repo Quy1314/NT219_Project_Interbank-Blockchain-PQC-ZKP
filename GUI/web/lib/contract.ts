@@ -22,6 +22,33 @@ export const getContract = (): ethers.Contract => {
 };
 
 /**
+ * Check if contract bytecode exists on-chain
+ */
+const isContractAvailable = async (): Promise<boolean> => {
+  if (!INTERBANK_TRANSFER_ADDRESS) {
+    return false;
+  }
+
+  try {
+    const provider = getProvider();
+    const code = await provider.getCode(INTERBANK_TRANSFER_ADDRESS);
+    const deployed = !!code && code !== '0x';
+
+    if (!deployed) {
+      console.warn(
+        `⚠️ Contract at ${INTERBANK_TRANSFER_ADDRESS} has no bytecode. ` +
+        'Make sure the contract is deployed or set NEXT_PUBLIC_CONTRACT_ADDRESS.'
+      );
+    }
+
+    return deployed;
+  } catch (error) {
+    console.error('Error checking contract deployment:', error);
+    return false;
+  }
+};
+
+/**
  * Get contract instance with signer (for write operations)
  */
 export const getContractWithSigner = (privateKey: string): ethers.Contract => {
@@ -38,6 +65,13 @@ export const getContractWithSigner = (privateKey: string): ethers.Contract => {
  */
 export const getContractBalance = async (userAddress: string): Promise<number | null> => {
   try {
+    if (!(await isContractAvailable())) {
+      console.warn(
+        `Skipping getContractBalance because contract at ${INTERBANK_TRANSFER_ADDRESS} is not deployed.`
+      );
+      return null;
+    }
+
     console.log('🔍 getContractBalance - Checking balance for:', userAddress);
     console.log('📝 Contract address:', INTERBANK_TRANSFER_ADDRESS);
     
@@ -71,6 +105,13 @@ export const transferViaContract = async (
   toBankCode: string,
   description: string
 ): Promise<{ txHash: string; txId: bigint }> => {
+  if (!(await isContractAvailable())) {
+    throw new Error(
+      'Smart contract chưa được triển khai hoặc NEXT_PUBLIC_CONTRACT_ADDRESS không chính xác. ' +
+      'Vui lòng deploy contract và cập nhật địa chỉ trước khi thực hiện giao dịch.'
+    );
+  }
+
   const amountWei = vndToWei(amountVND);
   
   // Get wallet and address first
@@ -182,6 +223,11 @@ export const transferViaContract = async (
  */
 export const getContractTransaction = async (txId: bigint) => {
   try {
+    if (!(await isContractAvailable())) {
+      console.warn('Skipping getContractTransaction because contract is not deployed.');
+      return null;
+    }
+
     const contract = getContract();
     const tx = await contract.getTransaction(txId);
     return {
@@ -207,6 +253,11 @@ export const getContractTransaction = async (txId: bigint) => {
  */
 export const getUserContractTransactions = async (userAddress: string): Promise<bigint[]> => {
   try {
+    if (!(await isContractAvailable())) {
+      console.warn('Skipping getUserContractTransactions because contract is not deployed.');
+      return [];
+    }
+
     const contract = getContract();
     const txIds = await contract.getUserTransactions(userAddress);
     return txIds.map((id: bigint) => id);
@@ -233,7 +284,6 @@ export const listenToTransferEvents = (
 ) => {
   try {
     const contract = getContract();
-    const provider = getProvider();
 
     // Listen to Transfer events
     contract.on('Transfer', (txId, from, to, amount, fromBank, toBank, description, timestamp) => {
@@ -264,12 +314,7 @@ export const listenToTransferEvents = (
  */
 export const isContractDeployed = async (): Promise<boolean> => {
   try {
-    if (!INTERBANK_TRANSFER_ADDRESS) {
-      return false;
-    }
-    const contract = getContract();
-    await contract.owner(); // Try to call a view function
-    return true;
+    return await isContractAvailable();
   } catch {
     return false;
   }
