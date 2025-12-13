@@ -219,6 +219,119 @@ export const transferViaContract = async (
 };
 
 /**
+ * Withdraw funds from smart contract
+ */
+export const withdrawViaContract = async (
+  fromPrivateKey: string,
+  amountVND: number,
+  description: string
+): Promise<{ txHash: string; txId: bigint }> => {
+  if (!(await isContractAvailable())) {
+    throw new Error(
+      'Smart contract chưa được triển khai hoặc NEXT_PUBLIC_CONTRACT_ADDRESS không chính xác. ' +
+      'Vui lòng deploy contract và cập nhật địa chỉ trước khi thực hiện rút tiền.'
+    );
+  }
+
+  const amountWei = vndToWei(amountVND);
+  
+  // Get wallet and address first
+  const wallet = new ethers.Wallet(fromPrivateKey);
+  const senderAddress = wallet.address;
+  
+  // Use read-only contract for balance check
+  const readContract = getContract();
+  
+  try {
+    const balance = await readContract.getBalance(senderAddress);
+    const balanceVND = weiToVnd(balance);
+    const balanceETH = ethers.formatEther(balance);
+    
+    console.log(`💰 Withdraw - Balance check: ${balanceVND.toLocaleString('vi-VN')} VND (${balanceETH} ETH)`);
+    console.log(`💸 Withdraw - Amount needed: ${amountVND.toLocaleString('vi-VN')} VND (${ethers.formatEther(amountWei)} ETH)`);
+    
+    if (balance < amountWei) {
+      throw new Error(
+        `Số dư trong contract không đủ. ` +
+        `Address: ${senderAddress} ` +
+        `Số dư hiện tại: ${balanceVND.toLocaleString('vi-VN')} VND, ` +
+        `Số tiền cần: ${amountVND.toLocaleString('vi-VN')} VND.`
+      );
+    }
+    console.log('✅ Withdraw - Balance check passed!');
+  } catch (error: any) {
+    if (error.message && error.message.includes('Số dư trong contract không đủ')) {
+      throw error;
+    }
+    console.error('❌ Error checking balance:', error);
+    throw new Error(
+      `Không thể kiểm tra số dư trong contract. Address: ${senderAddress}. ` +
+      `Lỗi: ${error.message || 'Unknown error'}.`
+    );
+  }
+
+  // Get contract with signer for withdraw
+  const contract = getContractWithSigner(fromPrivateKey);
+  
+  // Call the withdraw function
+  try {
+    const tx = await contract.withdraw(
+      amountWei,
+      description,
+      {
+        gasLimit: 15000000,
+        gasPrice: 0,
+      }
+    );
+
+    // Wait for transaction receipt
+    const receipt = await tx.wait(1);
+
+    // Get transaction ID from Transfer event
+    const transferEvent = receipt.logs.find((log: any) => {
+      try {
+        const parsedLog = contract.interface.parseLog(log);
+        return parsedLog?.name === 'Transfer';
+      } catch {
+        return false;
+      }
+    });
+
+    let txId: bigint = BigInt(0);
+    if (transferEvent) {
+      const parsedLog = contract.interface.parseLog(transferEvent);
+      if (parsedLog) {
+        txId = parsedLog.args.transactionId;
+      }
+    }
+
+    return {
+      txHash: tx.hash,
+      txId,
+    };
+  } catch (error: any) {
+    console.error('Error withdrawing via contract:', error);
+    
+    if (error.reason || error.data) {
+      const reason = error.reason || 'Transaction reverted';
+      if (reason.includes('Insufficient balance')) {
+        throw new Error(
+          'Số dư trong contract không đủ. Vui lòng kiểm tra số dư trước khi rút tiền.'
+        );
+      }
+      if (reason.includes('KYC not valid')) {
+        throw new Error(
+          'KYC chưa được xác minh hoặc đã hết hạn. Vui lòng liên hệ ngân hàng để xác minh KYC.'
+        );
+      }
+      throw new Error(`Lỗi từ contract: ${reason}`);
+    }
+    
+    throw error;
+  }
+};
+
+/**
  * Get transaction details from contract
  */
 export const getContractTransaction = async (txId: bigint) => {

@@ -2,14 +2,28 @@
 pragma solidity ^0.8.10;
 
 /**
+ * @dev Interface for PKIRegistry contract
+ */
+interface IPKIRegistry {
+    function isKYCValid(address _user) external view returns (bool);
+    function canUserTransfer(address _user, uint256 _amount) external view returns (bool);
+    function recordTransfer(address _user, uint256 _amount) external;
+    function getUserPublicKey(address _user) external view returns (bytes memory);
+}
+
+/**
  * @title InterbankTransfer
- * @dev Smart contract quản lý giao dịch liên ngân hàng
+ * @dev Smart contract quản lý giao dịch liên ngân hàng với PKI integration
  * - Quản lý số dư của từng bank
- * - Xử lý chuyển tiền liên ngân hàng
+ * - Xử lý chuyển tiền liên ngân hàng với KYC verification
  * - Phát events để thông báo
  * - Theo dõi trạng thái giao dịch
+ * - Tích hợp PKI Registry cho user authentication
  */
 contract InterbankTransfer {
+    // PKI Registry reference
+    IPKIRegistry public pkiRegistry;
+    bool public pkiEnabled;
     // Mapping từ address đến số dư (VND, nhưng lưu dưới dạng wei)
     mapping(address => uint256) public balances;
     
@@ -84,6 +98,23 @@ contract InterbankTransfer {
     constructor() {
         owner = msg.sender;
         transactionCounter = 0;
+        pkiEnabled = false; // Will be enabled after PKI deployment
+    }
+    
+    /**
+     * @dev Set PKI Registry address (only owner)
+     */
+    function setPKIRegistry(address _pkiRegistry) external onlyOwner {
+        require(_pkiRegistry != address(0), "Invalid PKI address");
+        pkiRegistry = IPKIRegistry(_pkiRegistry);
+        pkiEnabled = true;
+    }
+    
+    /**
+     * @dev Toggle PKI enforcement
+     */
+    function togglePKI(bool _enabled) external onlyOwner {
+        pkiEnabled = _enabled;
     }
     
     /**
@@ -142,6 +173,13 @@ contract InterbankTransfer {
             balances[msg.sender] >= amount,
             "Insufficient balance"
         );
+        require(msg.sender != to, "Cannot transfer to yourself");
+        
+        // PKI Verification (if enabled)
+        if (pkiEnabled && address(pkiRegistry) != address(0)) {
+            require(pkiRegistry.isKYCValid(msg.sender), "KYC not valid");
+            require(pkiRegistry.canUserTransfer(msg.sender, amount), "Transfer not authorized or exceeds daily limit");
+        }
         
         // Tạo transaction mới
         transactionCounter++;
@@ -183,6 +221,91 @@ contract InterbankTransfer {
         emit TransactionStatusChanged(txId, TransactionStatus.Completed);
         emit BalanceUpdated(msg.sender, balances[msg.sender]);
         emit BalanceUpdated(to, balances[to]);
+        
+        // Record transfer in PKI (if enabled)
+        if (pkiEnabled && address(pkiRegistry) != address(0)) {
+            pkiRegistry.recordTransfer(msg.sender, amount);
+        }
+        
+        return txId;
+    }
+    
+    /**
+     * @dev Get user's PQC public key from PKI
+     */
+    function getUserPublicKey(address user) external view returns (bytes memory) {
+        require(pkiEnabled && address(pkiRegistry) != address(0), "PKI not enabled");
+        return pkiRegistry.getUserPublicKey(user);
+    }
+    
+    /**
+     * @dev Check if user can transfer amount
+     */
+    function checkTransferAuthorization(address user, uint256 amount) external view returns (bool) {
+        if (!pkiEnabled || address(pkiRegistry) == address(0)) {
+            return true; // PKI not enforced
+        }
+        return pkiRegistry.isKYCValid(user) && pkiRegistry.canUserTransfer(user, amount);
+    }
+    
+    /**
+     * @dev Rút tiền từ contract (withdraw)
+     * @param amount Số tiền cần rút (trong wei)
+     * @param description Mô tả giao dịch rút tiền
+     * @return transactionId ID của giao dịch
+     */
+    function withdraw(uint256 amount, string memory description) public returns (uint256) {
+        require(amount > 0, "Amount must be greater than 0");
+        require(balances[msg.sender] >= amount, "Insufficient balance");
+        
+        // PKI Verification (if enabled) - rút tiền cũng cần KYC
+        if (pkiEnabled && address(pkiRegistry) != address(0)) {
+            require(pkiRegistry.isKYCValid(msg.sender), "KYC not valid");
+            // Withdraw không cần check daily limit vì đây là rút tiền, không phải transfer
+        }
+        
+        // Tạo transaction mới
+        transactionCounter++;
+        uint256 txId = transactionCounter;
+        
+        Transaction memory newTx = Transaction({
+            id: txId,
+            from: msg.sender,
+            to: address(0), // Burn address (0x0000...)
+            amount: amount,
+            fromBank: bankCodes[msg.sender],
+            toBank: "WITHDRAWAL",
+            description: description,
+            timestamp: block.timestamp,
+            status: TransactionStatus.Pending
+        });
+        
+        transactions.push(newTx);
+        transactionIndex[txId] = transactions.length - 1;
+        
+        // Trừ số dư từ contract
+        balances[msg.sender] -= amount;
+        
+        // Cập nhật trạng thái
+        transactions[transactions.length - 1].status = TransactionStatus.Completed;
+        
+        // Phát events
+        emit Transfer(
+            txId,
+            msg.sender,
+            address(0),
+            amount,
+            bankCodes[msg.sender],
+            "WITHDRAWAL",
+            description,
+            block.timestamp
+        );
+        emit TransactionStatusChanged(txId, TransactionStatus.Completed);
+        emit BalanceUpdated(msg.sender, balances[msg.sender]);
+        
+        // Gửi native ETH về cho user (nếu contract có ETH)
+        // Note: Trong hệ thống này, withdraw chỉ trừ contract balance, không gửi native ETH
+        // Vì số dư được quản lý trong contract, không phải native ETH
         
         return txId;
     }

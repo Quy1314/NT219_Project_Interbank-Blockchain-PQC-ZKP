@@ -1,0 +1,212 @@
+{
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "userAddress",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "keyHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "timestamp",
+          "type": "uint256"
+        }
+      ],
+      "name": "UserRegistered",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_user",
+          "type": "address"
+        }
+      ],
+      "name": "getUserInfo",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "userAddress",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "pqcPublicKey",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "keyHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "bool",
+              "name": "isActive",
+              "type": "bool"
+            },
+            {
+              "internalType": "uint256",
+              "name": "registeredAt",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lastUpdated",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct PKIRegistry.UserIdentity",
+          "name": "identity",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "bool",
+              "name": "isVerified",
+              "type": "bool"
+            },
+            {
+              "internalType": "uint256",
+              "name": "verifiedAt",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "expiresAt",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "kycHash",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "address",
+              "name": "verifier",
+              "type": "address"
+            }
+          ],
+          "internalType": "struct PKIRegistry.KYCInfo",
+          "name": "kyc",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "bool",
+              "name": "canTransfer",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "canReceive",
+              "type": "bool"
+            },
+            {
+              "internalType": "uint256",
+              "name": "dailyLimit",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "usedToday",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "lastResetDate",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct PKIRegistry.Authorization",
+          "name": "auth",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_user",
+          "type": "address"
+        }
+      ],
+      "name": "getUserPublicKey",
+      "outputs": [
+        {
+          "internalType": "bytes",
+          "name": "",
+          "type": "bytes"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_user",
+          "type": "address"
+        }
+      ],
+      "name": "isKYCValid",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_user",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "canUserTransfer",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ]
+}
+

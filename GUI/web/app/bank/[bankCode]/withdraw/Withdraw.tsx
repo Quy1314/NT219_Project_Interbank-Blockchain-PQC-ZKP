@@ -7,7 +7,7 @@ import { getBankByCode, BankUser } from '@/config/banks';
 import { formatVND, MOCK_MODE } from '@/config/blockchain';
 import { formatAddress, getBalanceVND, sendTransaction, waitForTransaction, getWallet } from '@/lib/blockchain';
 import { getBalanceForUser } from '@/lib/balances';
-import { isContractDeployed, getContractBalance } from '@/lib/contract';
+import { isContractDeployed, getContractBalance, withdrawViaContract } from '@/lib/contract';
 import { saveTransaction, generateReferenceCode, updateTransactionStatus, saveUserBalance, getStoredBalance } from '@/lib/storage';
 import { Transaction } from '@/types/transaction';
 
@@ -256,14 +256,30 @@ export default function Withdraw() {
           throw new Error('Lỗi bảo mật: Private key không khớp với địa chỉ tài khoản. Chỉ có thể rút tiền từ tài khoản của chính bạn.');
         }
         
-        // Send transaction to withdrawal address (trừ tiền từ blockchain)
-        const txResponse = await sendTransaction(
-          user.privateKey,
-          WITHDRAWAL_ADDRESS, // Send to withdrawal/burn address
-          amountNum,
-          'Rút tiền tại ATM'
-        );
-        txHash = txResponse.hash;
+        // Check if contract is deployed and use contract withdraw if available
+        const contractDeployed = useContract !== null ? useContract : await isContractDeployed();
+        
+        if (contractDeployed) {
+          // Use contract withdraw function (trừ tiền từ contract balance)
+          console.log('💰 Using contract withdraw function...');
+          const result = await withdrawViaContract(
+            user.privateKey,
+            amountNum,
+            'Rút tiền'
+          );
+          txHash = result.txHash;
+          console.log(`✅ Withdraw via contract successful! Tx Hash: ${txHash}, Tx ID: ${result.txId}`);
+        } else {
+          // Fallback: Send native transaction to withdrawal address
+          console.log('💰 Using native transaction (contract not deployed)...');
+          const txResponse = await sendTransaction(
+            user.privateKey,
+            WITHDRAWAL_ADDRESS, // Send to withdrawal/burn address
+            amountNum,
+            'Rút tiền'
+          );
+          txHash = txResponse.hash;
+        }
 
         // Create withdrawal transaction record (giống như transfer transaction)
         const transaction: Transaction = {
@@ -275,7 +291,7 @@ export default function Withdraw() {
           amount: amountNum,
           amountWei: '',
           fee: 0,
-          description: 'Rút tiền tại ATM',
+          description: 'Rút tiền',
           referenceCode: refCode,
           timestamp: new Date(),
           fromBank: user.id.split('_')[0],
@@ -360,7 +376,7 @@ export default function Withdraw() {
           // Hiển thị thông báo thành công với txHash
           setMessage({
             type: 'success',
-            text: `Rút tiền thành công! Transaction Hash: ${txHash.substring(0, 10)}... Mã nhận tiền: ${refCode}. Vui lòng đến ATM với mã này để nhận tiền.`,
+            text: `Rút tiền thành công! Transaction Hash: ${txHash.substring(0, 10)}... Mã tham chiếu: ${refCode}.`,
           });
 
           // Reset form
@@ -435,7 +451,7 @@ export default function Withdraw() {
       <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Tài khoản (Chỉ có thể rút từ tài khoản của bạn)
+            Tài khoản
           </label>
           <div className="p-4 bg-gray-50 rounded-lg border-2 border-blue-200">
             <p className="font-medium text-gray-900">{user.name}</p>
@@ -447,7 +463,7 @@ export default function Withdraw() {
               )}
             </p>
             <p className="text-xs text-blue-600 mt-2">
-              🔒 Bảo mật: Bạn chỉ có thể rút tiền từ tài khoản này
+              💡 Sử dụng dropdown ở trên để chọn user khác
             </p>
           </div>
         </div>
@@ -476,8 +492,8 @@ export default function Withdraw() {
           <div className="p-4 border-2 border-blue-600 bg-blue-50 rounded-lg flex items-center space-x-3">
             <Banknote className="h-8 w-8 text-blue-600" />
             <div>
-              <span className="font-medium text-gray-900">ATM</span>
-              <p className="text-sm text-gray-600">Rút tiền tại máy ATM</p>
+              <span className="font-medium text-gray-900">Rút tiền</span>
+              <p className="text-sm text-gray-600">Rút tiền từ tài khoản</p>
             </div>
           </div>
         </div>

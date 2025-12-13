@@ -2,7 +2,10 @@
 // Note: If rpcnode container is running, use port 8545
 // Otherwise, use port 21001 (sbv container)
 // You can check which ports are available with: docker ps --filter "publish=8545"
-export const RPC_ENDPOINT = process.env.NEXT_PUBLIC_RPC_ENDPOINT || 'http://localhost:21001';
+// 
+// ⚠️ TLS 1.3 is enabled by default! Use HTTPS endpoint.
+// If TLS is disabled, change to: http://localhost:21001
+export const RPC_ENDPOINT = process.env.NEXT_PUBLIC_RPC_ENDPOINT || 'https://localhost:21001';
 export const WS_ENDPOINT = process.env.NEXT_PUBLIC_WS_ENDPOINT || 'ws://localhost:8546';
 
 // Chain ID for the private network (from genesis)
@@ -17,7 +20,8 @@ export const GAS_PRICE = '0x0'; // Free gas for test network
 // Mock Mode: Set to true to enable mock transactions when blockchain balance is insufficient
 // Useful for demo/testing without real blockchain setup
 // WARNING: This will simulate successful transactions even with 0 balance!
-export const MOCK_MODE = true;
+// ✅ Contract deployed and initialized → MOCK_MODE disabled
+export const MOCK_MODE = false;
 
 // VND to Wei conversion
 // Contract balance: 100 ETH = 100,000,000 VND (100 triệu) - mỗi user có 100 ETH trong contract
