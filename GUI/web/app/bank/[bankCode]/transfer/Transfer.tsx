@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Send, Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
-import { getBankByCode, BankUser } from '@/config/banks';
+import { getBankByCode, BankUser, getAllUsers, BANKS } from '@/config/banks';
 import { formatVND, MOCK_MODE } from '@/config/blockchain';
 import { formatAddress, getBalanceVND, getWallet, sendTransaction, waitForTransaction } from '@/lib/blockchain';
 import { getBalanceForUser } from '@/lib/balances';
@@ -18,10 +18,14 @@ export default function Transfer() {
   const bankCode = params.bankCode as string;
 
   const [user, setUser] = useState<BankUser | null>(null);
+  const [toUser, setToUser] = useState<BankUser | null>(null);
   const [toAddress, setToAddress] = useState('');
   const [toBank, setToBank] = useState('');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
+  const [otp, setOtp] = useState('');
+  const [showOtp, setShowOtp] = useState(false);
+  const [generatedOtp, setGeneratedOtp] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [referenceCode, setReferenceCode] = useState('');
@@ -49,10 +53,14 @@ export default function Transfer() {
     checkContractStatus();
     loadBalance(newUser.address);
     // Reset form when user changes
+    setToUser(null);
     setToAddress('');
     setToBank('');
     setAmount('');
     setDescription('');
+    setOtp('');
+    setShowOtp(false);
+    setGeneratedOtp(null);
     setMessage(null);
   };
 
@@ -66,23 +74,33 @@ export default function Transfer() {
     }
   };
 
-  const loadBalance = async (address: string) => {
-    try {
-      const storedBalance = getStoredBalance(address);
-      if (storedBalance !== null) {
-        setBalance(storedBalance);
-        setIsRealBalance(MOCK_MODE);
+  const loadBalance = async (address: string, forceRefresh: boolean = false) => {
+    console.log('🔄 Loading balance for:', address, 'forceRefresh:', forceRefresh);
+    
+    // If force refresh, skip stored balance
+    if (!forceRefresh) {
+      try {
+        const storedBalance = getStoredBalance(address);
+        if (storedBalance !== null) {
+          setBalance(storedBalance);
+          setIsRealBalance(MOCK_MODE);
+        }
+      } catch (error) {
+        console.error('Error loading balance from storage:', error);
       }
-    } catch (error) {
-      console.error('Error loading balance from storage:', error);
     }
 
+    // Always try to get contract balance first (most accurate)
     try {
+      console.log('🔍 Fetching contract balance...');
       const contractBalance = await getContractBalance(address);
       if (contractBalance !== null && contractBalance >= 0) {
+        console.log('✅ Contract balance:', contractBalance);
         setBalance(contractBalance);
         setIsRealBalance(true);
         setUseContract(true);
+        // Update stored balance
+        saveUserBalance(address, contractBalance);
         return;
       }
     } catch (error) {
@@ -90,25 +108,33 @@ export default function Transfer() {
       setUseContract(false);
     }
 
+    // Fallback to native blockchain balance
     try {
+      console.log('🔍 Fetching native blockchain balance...');
       const blockchainBalance = await getBalanceVND(address);
       if (blockchainBalance !== null && blockchainBalance >= 0) {
+        console.log('✅ Native balance:', blockchainBalance);
         setBalance(blockchainBalance);
         setIsRealBalance(true);
+        // Update stored balance
+        saveUserBalance(address, blockchainBalance);
         return;
       }
     } catch (error) {
       console.error('Error loading balance from blockchain:', error);
     }
 
-    try {
-      const fileBalance = await getBalanceForUser(address);
-      if (fileBalance !== null && fileBalance >= 0) {
-        setBalance(fileBalance);
-        setIsRealBalance(false);
+    // Final fallback: file balance
+    if (!forceRefresh) {
+      try {
+        const fileBalance = await getBalanceForUser(address);
+        if (fileBalance !== null && fileBalance >= 0) {
+          setBalance(fileBalance);
+          setIsRealBalance(false);
+        }
+      } catch (error) {
+        console.error('Error loading balance from file:', error);
       }
-    } catch (error) {
-      console.error('Error loading balance from file:', error);
     }
   };
 
@@ -120,8 +146,8 @@ export default function Transfer() {
       return;
     }
 
-    if (!toAddress || !toBank || !amount) {
-      setMessage({ type: 'error', text: 'Vui lòng điền đầy đủ thông tin' });
+    if (!toUser || !toAddress || !toBank || !amount) {
+      setMessage({ type: 'error', text: 'Vui lòng chọn người nhận và điền đầy đủ thông tin' });
       return;
     }
 
@@ -138,6 +164,33 @@ export default function Transfer() {
       });
       return;
     }
+
+    // OTP validation step
+    if (!showOtp) {
+      // Generate new OTP (mock) - generate fresh OTP each time
+      const mockOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      setGeneratedOtp(mockOtp); // Store generated OTP for validation
+      setShowOtp(true);
+      setOtp(''); // Clear any previous OTP input
+      setMessage({ type: 'success', text: `Mã OTP: ${mockOtp} (Mock - dùng mã này để xác nhận)` });
+      return;
+    }
+
+    // Validate OTP - check if OTP is provided and matches generated OTP
+    if (!otp || otp.length !== 6) {
+      setMessage({ type: 'error', text: 'Mã OTP không hợp lệ. Vui lòng nhập 6 chữ số' });
+      return;
+    }
+
+    // Check if OTP matches the generated OTP
+    if (!generatedOtp || otp !== generatedOtp) {
+      setMessage({ type: 'error', text: 'Mã OTP không đúng. Vui lòng nhập lại mã OTP đã được gửi.' });
+      setOtp(''); // Clear incorrect OTP
+      return;
+    }
+
+    // OTP is valid, invalidate it immediately to prevent reuse
+    setGeneratedOtp(null);
 
     setIsProcessing(true);
     setMessage(null);
@@ -166,6 +219,14 @@ export default function Transfer() {
 
       if (useContract) {
         try {
+          console.log('🚀 Starting contract transfer...');
+          
+          // Show immediate notification that transaction is being sent
+          setMessage({
+            type: 'success',
+            text: 'Đang gửi transaction...',
+          });
+          
           const result = await transferViaContract(
             user.privateKey,
             toAddress,
@@ -174,27 +235,100 @@ export default function Transfer() {
             description || `Chuyển tiền đến ${toBank}`
           );
 
+          console.log('✅ Transfer result:', result);
+          console.log('✅ Transfer result type:', typeof result);
+          console.log('✅ Transfer result keys:', result ? Object.keys(result) : 'null');
+          console.log('✅ Transfer result.txHash:', result?.txHash);
+          console.log('✅ Transfer result.txHash type:', typeof result?.txHash);
+
+          if (!result) {
+            throw new Error('Transaction không trả về kết quả. Có thể transaction đã thất bại.');
+          }
+
+          if (!result.txHash) {
+            console.error('❌ Transaction hash is undefined!');
+            console.error('Full result object:', JSON.stringify(result, null, 2));
+            throw new Error('Transaction không trả về hash. Có thể transaction đã thất bại. Vui lòng kiểm tra console logs.');
+          }
+
+          // Ensure txHash is a string
+          const txHashString = String(result.txHash);
+          console.log('✅ Transaction hash (string):', txHashString);
+
+          // Update transaction status immediately with txHash
           updateTransactionStatus(
             bankCode,
             user.address,
             refCode,
-            'completed',
+            'processing', // Set to processing first, will be updated to completed when receipt confirms
             undefined,
-            result.txHash
+            txHashString
           );
 
+          console.log('✅ Transaction status updated with hash:', txHashString);
+
+          // Show success message immediately with txHash (like GitHub repo)
+          const shortHash = txHashString.length > 10 ? txHashString.substring(0, 10) + '...' : txHashString;
           setMessage({
             type: 'success',
-            text: `Chuyển tiền thành công! Tx Hash: ${result.txHash}`,
+            text: `Chuyển tiền thành công! Transaction Hash: ${shortHash} Mã tham chiếu: ${refCode}`,
           });
 
-          // Reload balance
+          // Clear form
+          setAmount('');
+          setDescription('');
+          setOtp('');
+          setShowOtp(false);
+          setGeneratedOtp(null); // Invalidate OTP after successful transfer
+
+          // Update status to completed in background (after receipt confirmation)
+          // Note: This is handled by the contract function which waits for receipt
           setTimeout(() => {
-            loadBalance(user.address);
+            updateTransactionStatus(
+              bankCode,
+              user.address,
+              refCode,
+              'completed',
+              undefined,
+              result.txHash
+            );
           }, 2000);
+
+          // Force reload balance immediately (skip cache)
+          console.log('🔄 Force reloading balance immediately...');
+          await loadBalance(user.address, true);
+          
+          // Retry after 1 second with force refresh
+          setTimeout(async () => {
+            console.log('🔄 Retrying balance reload (1s) with force refresh...');
+            await loadBalance(user.address, true);
+          }, 1000);
+          
+          // Retry after 2 seconds with force refresh
+          setTimeout(async () => {
+            console.log('🔄 Retrying balance reload (2s) with force refresh...');
+            await loadBalance(user.address, true);
+          }, 2000);
+          
+          // Retry after 3 seconds with force refresh
+          setTimeout(async () => {
+            console.log('🔄 Retrying balance reload (3s) with force refresh...');
+            await loadBalance(user.address, true);
+          }, 3000);
+          
+          // Final retry after 5 seconds
+          setTimeout(async () => {
+            console.log('🔄 Final balance reload (5s) with force refresh...');
+            await loadBalance(user.address, true);
+          }, 5000);
         } catch (error: any) {
           console.error('Transfer error:', error);
           updateTransactionStatus(bankCode, user.address, refCode, 'failed');
+          
+          // Invalidate OTP on error to prevent reuse
+          setGeneratedOtp(null);
+          setOtp('');
+          setShowOtp(false);
           
           let errorMessage = error.message || 'Lỗi không xác định';
           
@@ -294,34 +428,56 @@ export default function Transfer() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Đến địa chỉ (Address)
-            </label>
-            <input
-              type="text"
-              value={toAddress}
-              onChange={(e) => setToAddress(e.target.value)}
-              placeholder="0x..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Ngân hàng nhận
+              Chọn người nhận
             </label>
             <select
-              value={toBank}
-              onChange={(e) => setToBank(e.target.value)}
+              value={toUser ? `${toUser.id}` : ''}
+              onChange={(e) => {
+                const selectedUserId = e.target.value;
+                if (selectedUserId) {
+                  const allUsers = getAllUsers();
+                  const selectedUser = allUsers.find(u => u.id === selectedUserId);
+                  if (selectedUser) {
+                    setToUser(selectedUser);
+                    setToAddress(selectedUser.address);
+                    // Tìm bank code từ user
+                    const userBank = BANKS.find(bank => 
+                      bank.users.some(u => u.id === selectedUser.id)
+                    );
+                    if (userBank) {
+                      setToBank(userBank.code);
+                    }
+                  }
+                } else {
+                  setToUser(null);
+                  setToAddress('');
+                  setToBank('');
+                }
+              }}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               required
             >
-              <option value="">Chọn ngân hàng</option>
-              <option value="VCB">Vietcombank</option>
-              <option value="VTB">VietinBank</option>
-              <option value="BIDV">BIDV</option>
-              <option value="SBV">SBV</option>
+              <option value="">Chọn người nhận</option>
+              {getAllUsers()
+                .filter(u => u.id !== user?.id) // Loại bỏ user hiện tại
+                .map((u) => {
+                  const userBank = BANKS.find(bank => 
+                    bank.users.some(user => user.id === u.id)
+                  );
+                  return (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({userBank?.name || 'Unknown'}) - {formatAddress(u.address)}
+                    </option>
+                  );
+                })}
             </select>
+            {toUser && (
+              <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-sm font-medium text-gray-900">{toUser.name}</p>
+                <p className="text-xs text-gray-600 font-mono mt-1">{toAddress}</p>
+                <p className="text-xs text-blue-600 mt-1">Ngân hàng: {toBank}</p>
+              </div>
+            )}
           </div>
 
           <div>
@@ -354,6 +510,26 @@ export default function Transfer() {
             />
           </div>
 
+          {showOtp && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Mã OTP
+              </label>
+              <input
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Nhập mã OTP 6 chữ số"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                maxLength={6}
+                required
+              />
+              <p className="mt-2 text-sm text-gray-600">
+                Mã OTP đã được gửi (Mock). Vui lòng nhập mã OTP để xác nhận chuyển tiền.
+              </p>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isProcessing || balance === null || balance === 0}
@@ -367,10 +543,25 @@ export default function Transfer() {
             ) : (
               <>
                 <Send className="h-5 w-5" />
-                <span>Chuyển tiền</span>
+                <span>{showOtp ? 'Xác nhận chuyển tiền' : 'Tiếp tục'}</span>
               </>
             )}
           </button>
+
+          {showOtp && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowOtp(false);
+                setOtp('');
+                setGeneratedOtp(null); // Clear generated OTP when canceling
+                setMessage(null);
+              }}
+              className="mt-2 w-full text-sm text-gray-600 hover:text-gray-800 underline"
+            >
+              Hủy và quay lại
+            </button>
+          )}
 
           {useContract && (
             <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-800">

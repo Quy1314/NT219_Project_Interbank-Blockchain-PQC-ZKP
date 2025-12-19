@@ -1,13 +1,18 @@
 const path = require('path');
 const fs = require('fs-extra');
+const https = require('https');
 var ethers = require('ethers');
 
 // RPCNODE details - sử dụng port 21001 (sbv container)
 const { tessera, besu } = require("../keys.js");
-// Note: Nếu rpcnode không chạy, dùng port 21001
+// Note: Support both HTTP and HTTPS (TLS)
 const host = process.env.RPC_ENDPOINT || "http://127.0.0.1:21001";
 // Sử dụng private key của một account có balance (từ genesis)
 const accountPrivateKey = process.env.PRIVATE_KEY || "0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63";
+
+// TLS Configuration
+const CA_CERT_PATH = process.env.CA_CERT_PATH || path.resolve(__dirname, '../../../config/tls/ca/certs/sbv-root-ca.crt');
+const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === 'true';
 
 // Contract path
 const contractJsonPath = path.resolve(__dirname, '../../','contracts','InterbankTransfer.json');
@@ -31,7 +36,30 @@ if (!contractBytecode.startsWith('0x')) {
 async function deployContract() {
   try {
     console.log("Connecting to blockchain at:", host);
-    const provider = new ethers.JsonRpcProvider(host);
+    
+    // Setup TLS configuration if using HTTPS
+    let fetchRequest = undefined;
+    if (host.startsWith('https://')) {
+      const httpsAgent = new https.Agent({
+        rejectUnauthorized: !ALLOW_INSECURE_TLS,
+        ca: fs.existsSync(CA_CERT_PATH) ? fs.readFileSync(CA_CERT_PATH) : undefined
+      });
+      
+      if (fs.existsSync(CA_CERT_PATH)) {
+        console.log(`🔒 Using TLS with CA certificate: ${CA_CERT_PATH}`);
+      } else if (ALLOW_INSECURE_TLS) {
+        console.log(`⚠️  TLS enabled but CA cert not found. Using insecure mode (not recommended)`);
+      }
+      
+      fetchRequest = (url, options) => {
+        return fetch(url, {
+          ...options,
+          agent: httpsAgent
+        });
+      };
+    }
+    
+    const provider = new ethers.JsonRpcProvider(host, undefined, { fetchRequest });
     
     // Kiểm tra kết nối mạng
     try {

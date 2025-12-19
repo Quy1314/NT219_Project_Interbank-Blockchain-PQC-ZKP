@@ -12,50 +12,60 @@ interface IPKIRegistry {
 }
 
 /**
+ * @dev Interface for BalanceVerifier contract
+ */
+interface IBalanceVerifier {
+    struct BalanceProof {
+        uint256 amount;
+        bytes32 commitmentHash;
+        bytes proofBytes;
+        address userAddress;
+    }
+    
+    function verifyProof(BalanceProof memory proof) external returns (bool);
+    function isProofVerified(bytes32 proofHash) external view returns (bool);
+}
+
+/**
+ * @dev Interface cho PQCSignatureRegistry contract
+ */
+interface IPQCSignatureRegistry {
+    function storePQCSignature(
+        uint256 txId,
+        bytes calldata pqcSignature,
+        string calldata algorithm
+    ) external;
+}
+
+/**
  * @title InterbankTransfer
- * @dev Smart contract quản lý giao dịch liên ngân hàng với PKI integration
- * - Quản lý số dư của từng bank
- * - Xử lý chuyển tiền liên ngân hàng với KYC verification
- * - Phát events để thông báo
- * - Theo dõi trạng thái giao dịch
- * - Tích hợp PKI Registry cho user authentication
+ * @dev Smart contract quản lý giao dịch liên ngân hàng với PKI integration.
+ *
+ * Thiết kế tối giản để không vượt giới hạn kích thước contract (EIP‑170):
+ * - KHÔNG lưu toàn bộ lịch sử giao dịch on-chain (chỉ emit events `Transfer`).
+ * - ZKP được verify off-chain (Winterfell), on-chain chỉ kiểm tra integrity inputs + gọi verifier tối giản.
+ * - PQC signatures được lưu trong contract riêng `PQCSignatureRegistry` (Interbank chỉ gọi registry).
  */
 contract InterbankTransfer {
     // PKI Registry reference
     IPKIRegistry public pkiRegistry;
     bool public pkiEnabled;
+    
+    // Balance Verifier reference (ZKP verifier)
+    IBalanceVerifier public balanceVerifier;
+    bool public zkpEnabled;
+    
+    // PQC Signature Registry reference (lưu chữ ký PQC on-chain)
+    IPQCSignatureRegistry public pqcRegistry;
+    
     // Mapping từ address đến số dư (VND, nhưng lưu dưới dạng wei)
     mapping(address => uint256) public balances;
     
     // Mapping từ address đến bank code
     mapping(address => string) public bankCodes;
     
-    // Struct cho giao dịch
-    struct Transaction {
-        uint256 id;
-        address from;
-        address to;
-        uint256 amount; // in wei (số dư thực tế)
-        string fromBank;
-        string toBank;
-        string description;
-        uint256 timestamp;
-        TransactionStatus status;
-    }
-    
-    // Enum cho trạng thái giao dịch
-    enum TransactionStatus {
-        Pending,
-        Processing,
-        Completed,
-        Failed
-    }
-    
-    // Mảng các giao dịch
-    Transaction[] public transactions;
-    
-    // Mapping từ transaction ID đến index trong mảng
-    mapping(uint256 => uint256) public transactionIndex;
+    // Đếm số lượng giao dịch đã thực hiện (dùng làm transactionId trong event)
+    uint256 public transactionCounter;
     
     // Events
     event Deposit(address indexed user, uint256 amount, string bankCode);
@@ -69,18 +79,11 @@ contract InterbankTransfer {
         string description,
         uint256 timestamp
     );
-    event TransactionStatusChanged(
-        uint256 indexed transactionId,
-        TransactionStatus status
-    );
     event BalanceUpdated(address indexed user, uint256 newBalance);
     
     // Chỉ owner (hoặc authorized banks) mới có thể thực hiện một số hàm
     address public owner;
     mapping(address => bool) public authorizedBanks;
-    
-    // Counter cho transaction ID
-    uint256 private transactionCounter;
     
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
@@ -99,6 +102,7 @@ contract InterbankTransfer {
         owner = msg.sender;
         transactionCounter = 0;
         pkiEnabled = false; // Will be enabled after PKI deployment
+        zkpEnabled = false; // Will be enabled after BalanceVerifier deployment
     }
     
     /**
@@ -115,6 +119,31 @@ contract InterbankTransfer {
      */
     function togglePKI(bool _enabled) external onlyOwner {
         pkiEnabled = _enabled;
+    }
+    
+    /**
+     * @dev Set Balance Verifier address (only owner)
+     */
+    function setBalanceVerifier(address _balanceVerifier) external onlyOwner {
+        require(_balanceVerifier != address(0), "Invalid verifier address");
+        balanceVerifier = IBalanceVerifier(_balanceVerifier);
+        zkpEnabled = true;
+    }
+    
+    /**
+     * @dev Set PQC Signature Registry address (only owner)
+     */
+    function setPQCRegistry(address _pqcRegistry) external onlyOwner {
+        require(_pqcRegistry != address(0), "Invalid PQC registry address");
+        pqcRegistry = IPQCSignatureRegistry(_pqcRegistry);
+    }
+    
+    /**
+     * @dev Toggle ZKP enforcement
+     */
+    function toggleZKP(bool _enabled) external onlyOwner {
+        require(address(balanceVerifier) != address(0), "BalanceVerifier not set");
+        zkpEnabled = _enabled;
     }
     
     /**
@@ -181,33 +210,14 @@ contract InterbankTransfer {
             require(pkiRegistry.canUserTransfer(msg.sender, amount), "Transfer not authorized or exceeds daily limit");
         }
         
-        // Tạo transaction mới
-        transactionCounter++;
-        uint256 txId = transactionCounter;
-        
-        Transaction memory newTx = Transaction({
-            id: txId,
-            from: msg.sender,
-            to: to,
-            amount: amount,
-            fromBank: bankCodes[msg.sender],
-            toBank: toBankCode,
-            description: description,
-            timestamp: block.timestamp,
-            status: TransactionStatus.Pending
-        });
-        
-        transactions.push(newTx);
-        transactionIndex[txId] = transactions.length - 1;
-        
         // Cập nhật số dư
         balances[msg.sender] -= amount;
         balances[to] += amount;
         
-        // Cập nhật trạng thái
-        transactions[transactions.length - 1].status = TransactionStatus.Completed;
-        
-        // Phát events
+        // Sinh transactionId mới & phát events (lưu history qua event, không lưu struct)
+        transactionCounter++;
+        uint256 txId = transactionCounter;
+
         emit Transfer(
             txId,
             msg.sender,
@@ -218,7 +228,158 @@ contract InterbankTransfer {
             description,
             block.timestamp
         );
-        emit TransactionStatusChanged(txId, TransactionStatus.Completed);
+        emit BalanceUpdated(msg.sender, balances[msg.sender]);
+        emit BalanceUpdated(to, balances[to]);
+        
+        // Record transfer in PKI (if enabled)
+        if (pkiEnabled && address(pkiRegistry) != address(0)) {
+            pkiRegistry.recordTransfer(msg.sender, amount);
+        }
+        
+        return txId;
+    }
+    
+    /**
+     * @dev Chuyển tiền với PQC signature (lưu signature on-chain)
+     * @param to Địa chỉ người nhận
+     * @param amount Số tiền (trong wei)
+     * @param toBankCode Mã ngân hàng nhận
+     * @param description Mô tả giao dịch
+     * @param pqcSignature PQC signature (Base64 encoded bytes)
+     * @param algorithm PQC algorithm name (e.g., "Dilithium3")
+     * @return transactionId ID của giao dịch
+     */
+    function transferWithPQC(
+        address to,
+        uint256 amount,
+        string memory toBankCode,
+        string memory description,
+        bytes memory pqcSignature,
+        string memory algorithm
+    ) public returns (uint256) {
+        require(to != address(0), "Invalid recipient address");
+        require(amount > 0, "Amount must be greater than 0");
+        require(
+            balances[msg.sender] >= amount,
+            "Insufficient balance"
+        );
+        require(msg.sender != to, "Cannot transfer to yourself");
+        require(pqcSignature.length > 0, "PQC signature cannot be empty");
+        require(bytes(algorithm).length > 0, "Algorithm cannot be empty");
+        
+        // PKI Verification (if enabled)
+        if (pkiEnabled && address(pkiRegistry) != address(0)) {
+            require(pkiRegistry.isKYCValid(msg.sender), "KYC not valid");
+            require(pkiRegistry.canUserTransfer(msg.sender, amount), "Transfer not authorized or exceeds daily limit");
+        }
+        
+        // Lưu PQC signature on-chain qua PQCSignatureRegistry (nếu đã cấu hình)
+        // (Nếu chưa cấu hình pqcRegistry thì vẫn cho phép chuyển tiền nhưng không lưu chữ ký)
+        
+        // Cập nhật số dư
+        balances[msg.sender] -= amount;
+        balances[to] += amount;
+        
+        // Sinh transactionId mới & phát events
+        transactionCounter++;
+        uint256 txId = transactionCounter;
+
+        emit Transfer(
+            txId,
+            msg.sender,
+            to,
+            amount,
+            bankCodes[msg.sender],
+            toBankCode,
+            description,
+            block.timestamp
+        );
+        emit BalanceUpdated(msg.sender, balances[msg.sender]);
+        emit BalanceUpdated(to, balances[to]);
+        
+        // Lưu PQC signature on-chain sau khi transfer thành công
+        if (address(pqcRegistry) != address(0)) {
+            pqcRegistry.storePQCSignature(txId, pqcSignature, algorithm);
+        }
+        
+        // Record transfer in PKI (if enabled)
+        if (pkiEnabled && address(pkiRegistry) != address(0)) {
+            pkiRegistry.recordTransfer(msg.sender, amount);
+        }
+        
+        return txId;
+    }
+    
+    /**
+     * @dev Chuyển tiền với ZKP proof (balance > amount)
+     * @param to Địa chỉ người nhận
+     * @param amount Số tiền (trong wei)
+     * @param toBankCode Mã ngân hàng nhận
+     * @param description Mô tả giao dịch
+     * @param proofAmount Số tiền trong proof
+     * @param commitmentHash Hash của balance commitment
+     * @param proofBytes Proof bytes từ ZKP prover
+     * @return transactionId ID của giao dịch
+     */
+    function transferWithZKP(
+        address to,
+        uint256 amount,
+        string memory toBankCode,
+        string memory description,
+        uint256 proofAmount,
+        bytes32 commitmentHash,
+        bytes memory proofBytes
+    ) public returns (uint256) {
+        require(to != address(0), "Invalid recipient address");
+        require(amount > 0, "Amount must be greater than 0");
+        require(msg.sender != to, "Cannot transfer to yourself");
+        require(zkpEnabled && address(balanceVerifier) != address(0), "ZKP not enabled");
+        require(proofAmount == amount, "Proof amount mismatch");
+        
+        // Tạo BalanceProof struct
+        IBalanceVerifier.BalanceProof memory proof = IBalanceVerifier.BalanceProof({
+            amount: proofAmount,
+            commitmentHash: commitmentHash,
+            proofBytes: proofBytes,
+            userAddress: msg.sender
+        });
+        
+        // Verify ZKP proof
+        bool verified = balanceVerifier.verifyProof(proof);
+        require(verified, "ZKP proof verification failed");
+        
+        // Verify balance từ contract (double check)
+        // Note: Trong production, balance sẽ được verify từ commitment
+        // nhưng để đảm bảo tính nhất quán, chúng ta vẫn check balance thực tế
+        require(
+            balances[msg.sender] >= amount,
+            "Insufficient balance"
+        );
+        
+        // PKI Verification (if enabled)
+        if (pkiEnabled && address(pkiRegistry) != address(0)) {
+            require(pkiRegistry.isKYCValid(msg.sender), "KYC not valid");
+            require(pkiRegistry.canUserTransfer(msg.sender, amount), "Transfer not authorized or exceeds daily limit");
+        }
+        
+        // Cập nhật số dư
+        balances[msg.sender] -= amount;
+        balances[to] += amount;
+        
+        // Sinh transactionId mới & phát events
+        transactionCounter++;
+        uint256 txId = transactionCounter;
+
+        emit Transfer(
+            txId,
+            msg.sender,
+            to,
+            amount,
+            bankCodes[msg.sender],
+            toBankCode,
+            description,
+            block.timestamp
+        );
         emit BalanceUpdated(msg.sender, balances[msg.sender]);
         emit BalanceUpdated(to, balances[to]);
         
@@ -264,32 +425,14 @@ contract InterbankTransfer {
             // Withdraw không cần check daily limit vì đây là rút tiền, không phải transfer
         }
         
-        // Tạo transaction mới
-        transactionCounter++;
-        uint256 txId = transactionCounter;
-        
-        Transaction memory newTx = Transaction({
-            id: txId,
-            from: msg.sender,
-            to: address(0), // Burn address (0x0000...)
-            amount: amount,
-            fromBank: bankCodes[msg.sender],
-            toBank: "WITHDRAWAL",
-            description: description,
-            timestamp: block.timestamp,
-            status: TransactionStatus.Pending
-        });
-        
-        transactions.push(newTx);
-        transactionIndex[txId] = transactions.length - 1;
-        
         // Trừ số dư từ contract
         balances[msg.sender] -= amount;
-        
-        // Cập nhật trạng thái
-        transactions[transactions.length - 1].status = TransactionStatus.Completed;
-        
-        // Phát events
+        emit BalanceUpdated(msg.sender, balances[msg.sender]);
+
+        // Sinh transactionId mới & phát events (chỉ để tracking, không gửi native ETH)
+        transactionCounter++;
+        uint256 txId = transactionCounter;
+
         emit Transfer(
             txId,
             msg.sender,
@@ -300,107 +443,7 @@ contract InterbankTransfer {
             description,
             block.timestamp
         );
-        emit TransactionStatusChanged(txId, TransactionStatus.Completed);
-        emit BalanceUpdated(msg.sender, balances[msg.sender]);
-        
-        // Gửi native ETH về cho user (nếu contract có ETH)
-        // Note: Trong hệ thống này, withdraw chỉ trừ contract balance, không gửi native ETH
-        // Vì số dư được quản lý trong contract, không phải native ETH
-        
         return txId;
-    }
-    
-    /**
-     * @dev Lấy thông tin giao dịch
-     */
-    function getTransaction(uint256 txId)
-        public
-        view
-        returns (
-            uint256 id,
-            address from,
-            address to,
-            uint256 amount,
-            string memory fromBank,
-            string memory toBank,
-            string memory description,
-            uint256 timestamp,
-            TransactionStatus status
-        )
-    {
-        require(txId > 0 && txId <= transactionCounter, "Invalid transaction ID");
-        uint256 index = transactionIndex[txId];
-        Transaction memory transaction = transactions[index];
-        
-        return (
-            transaction.id,
-            transaction.from,
-            transaction.to,
-            transaction.amount,
-            transaction.fromBank,
-            transaction.toBank,
-            transaction.description,
-            transaction.timestamp,
-            transaction.status
-        );
-    }
-    
-    /**
-     * @dev Lấy tổng số giao dịch
-     */
-    function getTransactionCount() public view returns (uint256) {
-        return transactions.length;
-    }
-    
-    /**
-     * @dev Lấy danh sách giao dịch của một user (sender hoặc receiver)
-     */
-    function getUserTransactions(address user)
-        public
-        view
-        returns (uint256[] memory)
-    {
-        uint256 count = 0;
-        
-        // Đếm số giao dịch
-        for (uint256 i = 0; i < transactions.length; i++) {
-            if (
-                transactions[i].from == user ||
-                transactions[i].to == user
-            ) {
-                count++;
-            }
-        }
-        
-        // Tạo mảng kết quả
-        uint256[] memory userTxs = new uint256[](count);
-        uint256 index = 0;
-        
-        for (uint256 i = 0; i < transactions.length; i++) {
-            if (
-                transactions[i].from == user ||
-                transactions[i].to == user
-            ) {
-                userTxs[index] = transactions[i].id;
-                index++;
-            }
-        }
-        
-        return userTxs;
-    }
-    
-    /**
-     * @dev Cập nhật trạng thái giao dịch (chỉ owner hoặc authorized banks)
-     */
-    function updateTransactionStatus(
-        uint256 txId,
-        TransactionStatus status
-    ) public onlyAuthorized {
-        require(txId > 0 && txId <= transactionCounter, "Invalid transaction ID");
-        uint256 index = transactionIndex[txId];
-        transactions[index].status = status;
-        
-        emit TransactionStatusChanged(txId, status);
     }
 }
 

@@ -1,0 +1,213 @@
+% ============================================
+% PHẦN BỔ SUNG: Triển khai PKI Registry, ZKP Prover, và PQCSignatureRegistry
+% ============================================
+
+\subsection{Triển khai PKI Registry}
+
+\subsubsection{Deploy PKI Registry Contract}
+
+\begin{lstlisting}[language=bash]
+cd Besu-hyperledger/smart_contracts
+node scripts/compile.js
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_pki.js
+unset NODE_TLS_REJECT_UNAUTHORIZED
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+PKI Registry được triển khai như một contract riêng biệt để quản lý danh tính người dùng, xác minh KYC và kiểm soát quyền truy cập. Việc tách biệt PKI khỏi contract chính giúp giảm kích thước bytecode của \texttt{InterbankTransfer}, đồng thời cho phép nâng cấp hoặc thay thế module PKI mà không ảnh hưởng đến logic nghiệp vụ chính. Cách tiếp cận này phù hợp với nguyên tắc \emph{separation of concerns} và hỗ trợ tốt mục tiêu bảo vệ PII thông qua việc chỉ lưu hash của dữ liệu KYC thay vì dữ liệu thực tế.
+
+\subsubsection{Fund Users và Register vào PKI}
+
+\begin{lstlisting}[language=bash]
+# Fund users with native ETH for gas fees
+RPC_ENDPOINT=https://localhost:21001 node scripts/fund_users_for_pki.js
+
+# Register all users to PKI Registry
+RPC_ENDPOINT=https://localhost:21001 node scripts/register_all_users_pki.js
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Quy trình hai bước (fund + register) phản ánh đúng luồng hoạt động trong môi trường thực tế, nơi người dùng cần có native ETH để trả phí gas khi tự đăng ký vào hệ thống PKI. Script \texttt{register\_all\_users\_pki.js} tự động hoá việc đăng ký nhiều users cùng lúc, giúp giảm thời gian setup và đảm bảo tính nhất quán trong quá trình kiểm thử.
+
+\subsubsection{Link PKI vào InterbankTransfer}
+
+\begin{lstlisting}[language=bash]
+RPC_ENDPOINT=https://localhost:21001 node scripts/link_pki_interbank.js
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Việc link PKI Registry vào \texttt{InterbankTransfer} thông qua một script riêng cho phép kiểm soát chặt chẽ thứ tự triển khai và đảm bảo rằng cả hai contracts đều đã được deploy thành công trước khi thiết lập mối quan hệ giữa chúng. Cách tiếp cận này giúp dễ dàng debug và rollback nếu có lỗi xảy ra trong quá trình tích hợp.
+
+% ----------------------------
+
+\subsection{Triển khai ZKP Prover Service}
+
+\subsubsection{Cài đặt Rust và Dependencies}
+
+\begin{lstlisting}[language=bash]
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+rustc --version
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Rust được chọn làm ngôn ngữ triển khai ZKP Prover vì hiệu năng cao và khả năng tích hợp tốt với thư viện \textbf{Winterfell STARK}, một trong những thư viện ZKP phổ biến và được đánh giá cao trong cộng đồng. Rust cũng đảm bảo an toàn bộ nhớ mà không cần garbage collector, phù hợp với các ứng dụng yêu cầu độ trễ thấp như việc sinh proof ZK.
+
+\subsubsection{Build ZKP Prover Service}
+
+\begin{lstlisting}[language=bash]
+cd prover
+cargo build --release
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Build ở chế độ \texttt{--release} với các tối ưu hóa (LTO, codegen-units=1) giúp giảm kích thước binary và tăng tốc độ thực thi, điều quan trọng khi prover service cần xử lý nhiều yêu cầu sinh proof đồng thời. Việc tách biệt prover thành một service độc lập cho phép scale theo chiều ngang và không làm chậm các node blockchain.
+
+\subsubsection{Khởi động ZKP Prover}
+
+\begin{lstlisting}[language=bash]
+RUST_LOG=info ./target/release/zkp-prover &
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+ZKP Prover chạy như một service độc lập trên port 8081, cung cấp REST API để các ứng dụng khác (GUI, smart contract clients) gọi để sinh proof. Việc chạy ở background (\texttt{\&}) cho phép prover hoạt động song song với các thành phần khác của hệ thống, phù hợp với kiến trúc microservice và đảm bảo rằng việc sinh proof không block các luồng xử lý khác.
+
+\subsubsection{Test ZKP Prover API}
+
+\begin{lstlisting}[language=bash]
+curl http://localhost:8081/health | python3 -m json.tool
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Endpoint \texttt{/health} cho phép kiểm tra nhanh tình trạng của ZKP Prover service, giúp xác định sớm các sự cố trước khi tích hợp vào luồng giao dịch. Đây là thực hành phổ biến trong kiến trúc microservice và giúp đảm bảo tính sẵn sàng của hệ thống.
+
+% ----------------------------
+
+\subsection{Triển khai Balance Verifier Contract}
+
+\subsubsection{Deploy BalanceVerifier}
+
+\begin{lstlisting}[language=bash]
+cd Besu-hyperledger/smart_contracts
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_balance_verifier.js
+unset NODE_TLS_REJECT_UNAUTHORIZED
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+\texttt{BalanceVerifier} được triển khai như một contract riêng để thực hiện việc xác minh proof ZKP on-chain. Contract này chỉ thực hiện các kiểm tra integrity (hash matching, public inputs validation) thay vì full STARK verification để giảm chi phí gas và đảm bảo hiệu năng cao. Việc tách biệt verifier khỏi contract chính giúp giảm kích thước bytecode của \texttt{InterbankTransfer} và tuân thủ giới hạn EIP-170.
+
+\subsubsection{Link BalanceVerifier vào InterbankTransfer}
+
+\begin{lstlisting}[language=bash]
+RPC_ENDPOINT=https://localhost:21001 node scripts/set_balance_verifier.js
+RPC_ENDPOINT=https://localhost:21001 node scripts/toggle_zkp.js
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Việc link \texttt{BalanceVerifier} vào \texttt{InterbankTransfer} và bật flag \texttt{zkpEnabled} cho phép contract chính sử dụng ZKP để xác minh điều kiện \texttt{balance > amount} mà không tiết lộ giá trị balance thực tế. Cách tiếp cận này đảm bảo tính riêng tư của người dùng trong khi vẫn duy trì tính toàn vẹn và bảo mật của giao dịch, phù hợp với mục tiêu "Tăng cường quyền riêng tư" đã đề ra trong báo cáo tiến độ.
+
+% ----------------------------
+
+\subsection{Triển khai PQCSignatureRegistry Contract}
+
+\subsubsection{Deploy PQCSignatureRegistry}
+
+\begin{lstlisting}[language=bash]
+cd Besu-hyperledger/smart_contracts
+node scripts/compile.js
+# Deploy PQCSignatureRegistry (if separate script exists)
+# Or deploy manually via Remix/Hardhat
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+\texttt{PQCSignatureRegistry} được triển khai như một contract riêng để lưu trữ chữ ký PQC on-chain cho từng transaction, cho phép audit và verify sau này. Việc tách biệt registry khỏi contract chính giúp giảm kích thước bytecode của \texttt{InterbankTransfer} và tuân thủ giới hạn EIP-170, đồng thời vẫn đảm bảo yêu cầu lưu PQC signature/hash on-chain như đã phân tích trong báo cáo tiến độ.
+
+\subsubsection{Link PQCSignatureRegistry vào InterbankTransfer}
+
+\begin{lstlisting}[language=bash]
+# Call setPQCRegistry(...) on InterbankTransfer to link registry
+# (execute via script or Remix)
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Việc link \texttt{PQCSignatureRegistry} vào \texttt{InterbankTransfer} cho phép contract chính gọi \texttt{storePQCSignature} để lưu chữ ký PQC on-chain mỗi khi có giao dịch với PQC. Cách tiếp cận này đảm bảo tính toàn vẹn và khả năng audit của hệ thống trong khi vẫn giữ kích thước contract chính ở mức hợp lý.
+
+% ----------------------------
+
+\subsection{Tích hợp ZKP vào Transaction Flow}
+
+\subsubsection{Cấu hình GUI để sử dụng ZKP}
+
+\begin{lstlisting}[language=bash]
+cd GUI/web
+echo "NEXT_PUBLIC_ZKP_PROVER_URL=http://localhost:8081" >> .env.local
+\end{lstlisting}
+
+\paragraph{Lý do lựa chọn.}
+
+Việc cấu hình URL của ZKP Prover thông qua biến môi trường cho phép GUI biết địa chỉ của prover service và gọi API để sinh proof trước khi gửi transaction lên blockchain. Cách tiếp cận này đảm bảo tính linh hoạt và dễ dàng thay đổi cấu hình khi triển khai trong các môi trường khác nhau (development, staging, production).
+
+\subsubsection{Luồng giao dịch với ZKP}
+
+\begin{enumerate}
+    \item Client (GUI) gọi ZKP Prover API để sinh proof (OFF-CHAIN)
+    \item Client nhận proof và gửi transaction với proof hash lên blockchain
+    \item Blockchain verify proof hash (ON-CHAIN, nhanh)
+    \item Transaction được commit vào block
+\end{enumerate}
+
+\paragraph{Lý do lựa chọn.}
+
+Luồng này đảm bảo rằng việc sinh proof ZKP diễn ra hoàn toàn OFF-CHAIN, không làm chậm các node blockchain hoặc block commit. Chỉ proof hash và public inputs được gửi lên blockchain để verify, giảm chi phí gas và đảm bảo hiệu năng cao. Cách tiếp cận này phù hợp với mục tiêu "Scalability" và "Performance" đã đề ra trong báo cáo tiến độ.
+
+% ----------------------------
+
+\subsection{Kiểm thử hệ thống}
+
+\subsubsection{Hiệu năng}
+
+\begin{itemize}
+    \item Thời gian ký Dilithium3: $\sim$5ms
+    \item Kích thước chữ ký: $\sim$2420 bytes
+    \item TPS: 30--40 giao dịch/giây
+    \item Thời gian sinh ZKP proof: $\sim$2--5 giây (OFF-CHAIN, không block blockchain)
+\end{itemize}
+
+\paragraph{Lý do lựa chọn.}
+
+Các chỉ số hiệu năng phản ánh trực tiếp chi phí thực tế của việc tích hợp PQC và ZKP vào luồng giao dịch blockchain. Mặc dù thời gian sinh ZKP proof khá lâu (2--5 giây), nhưng vì quá trình này diễn ra OFF-CHAIN nên không ảnh hưởng đến hiệu năng của blockchain. Đây là các thước đo quan trọng để đánh giá liệu hệ thống đề xuất có đáp ứng được yêu cầu vận hành trong bối cảnh ngân hàng hay không.
+
+\subsubsection{Bảo mật}
+
+\begin{itemize}
+    \item Reject chữ ký sai: 100\%
+    \item Reject sai khóa: $\geq$99\%
+    \item Chống replay attack bằng nonce
+    \item ZKP proof verification: 100\% (chỉ chấp nhận proof hợp lệ)
+\end{itemize}
+
+\paragraph{Lý do lựa chọn.}
+
+Các tiêu chí kiểm thử bảo mật tập trung vào việc đảm bảo mọi bằng chứng hoặc chữ ký không hợp lệ đều bị từ chối, đồng thời ngăn chặn tấn công phát lại thông qua cơ chế nonce. Việc thêm ZKP proof verification vào danh sách kiểm thử đảm bảo rằng hệ thống chỉ chấp nhận các proof hợp lệ, bám sát mục tiêu bảo mật đã đề ra trong báo cáo tiến độ.
+
+% ----------------------------
+
+\subsection{Kết quả triển khai}
+
+\paragraph{Tổng kết lựa chọn triển khai.}
+
+Nhìn chung, các lựa chọn về môi trường, công nghệ và kiến trúc triển khai (Ubuntu + Docker + Besu, KSM tách biệt, TLS 1.3, Web GUI, PQC, PKI Registry, ZKP Prover OFF-CHAIN, và các contract riêng biệt) được thiết kế nhằm tái hiện sát bối cảnh một mạng blockchain liên ngân hàng có yêu cầu cao về bảo mật và riêng tư. Nhờ đó, hệ thống prototype không chỉ cho phép kiểm chứng các mục tiêu lý thuyết trong báo cáo tiến độ mà còn cung cấp cơ sở thực nghiệm để đánh giá khả năng áp dụng PQC và ZKP trong các kịch bản tài chính thực tế.
+

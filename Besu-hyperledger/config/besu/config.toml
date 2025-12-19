@@ -6,13 +6,22 @@ data-path="/opt/besu/data"
 host-allowlist=["*"]
 min-gas-price=0
 
-# rpc
+# rpc with TLS 1.3
 rpc-http-enabled=true
 rpc-http-host="0.0.0.0"
 rpc-http-port=8545
 rpc-http-cors-origins=["*"]
 
-# ws
+# TLS 1.3 Configuration for HTTP RPC (AES-GCM-256)
+rpc-http-tls-enabled=true
+rpc-http-tls-keystore-file="/config/tls/NODE_NAME/NODE_NAME-keystore.p12"
+rpc-http-tls-keystore-password-file="/config/tls/NODE_NAME/password.txt"
+rpc-http-tls-client-auth-enabled=false
+rpc-http-tls-known-clients-file="/config/tls/NODE_NAME/NODE_NAME-truststore.p12"
+rpc-http-tls-protocols=["TLSv1.3"]
+rpc-http-tls-cipher-suites=["TLS_AES_256_GCM_SHA384","TLS_AES_128_GCM_SHA256"]
+
+# ws (TLS not supported for WebSocket in Besu)
 rpc-ws-enabled=true
 rpc-ws-host="0.0.0.0"
 rpc-ws-port=8546

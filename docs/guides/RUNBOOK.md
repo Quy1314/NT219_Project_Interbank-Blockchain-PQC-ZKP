@@ -4,10 +4,11 @@ Runbook này hướng dẫn chi tiết cách khởi động hệ thống từ đ
 
 ## 🎯 Quick Decision Guide
 
-**Bạn muốn:**
-- 🔐 **Full security (TLS 1.3 + PQC)?** → Follow [Quick Start Full Security](#-quick-start-với-tls-13--pqc-full-security---khuyên-dùng)
-- ⚡ **Simple & fast?** → Follow [Quick Start Simple](#quick-start-không-tlspqc-đơn-giản-nhất)
-- 🧪 **Only PQC testing?** → Follow [Quick Start PQC only](#quick-start-với-pqc-không-tls)
+**🔐 Full Security (TLS 1.3 + PQC + PKI + ZKP) - Khuyên dùng**
+
+Follow [Quick Start Full Security](#-quick-start-với-tls-13--pqc-full-security---khuyên-dùng) để có đầy đủ bảo mật theo yêu cầu NT219_BaoCaoTienDo-2.pdf.
+
+**⚠️ QUAN TRỌNG:** ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security cho hệ thống!
 
 **💡 Important:** Khi TLS enabled, node **CHỈ** accept **HTTPS** (`https://localhost:21001`), không accept HTTP!
 
@@ -19,15 +20,13 @@ Runbook này hướng dẫn chi tiết cách khởi động hệ thống từ đ
 4. [Bước 1: Khởi động Blockchain](#bước-1-khởi-động-blockchain)
 5. [Bước 2: Kiểm tra Blockchain](#bước-2-kiểm-tra-blockchain)
 6. [Bước 3: Deploy Smart Contracts](#bước-3-deploy-smart-contracts) **⭐ CẬP NHẬT**
-   - [3.1-3.5: Deploy InterbankTransfer](#bước-3-deploy-smart-contracts)
-   - [3.6: Deploy lại Contract (nếu có thay đổi)](#35-deploy-lại-contract-nếu-có-thay-đổi) **⭐ MỚI**
-   - [3.7: Deploy PKI Registry](#bước-37-deploy-pki-registry-user-management) **⭐ MỚI**
-   - [3.8: Link PKI to InterbankTransfer](#bước-38-link-pki-to-interbanktransfer) **⭐ MỚI**
+   - [3.1-3.4: Deploy InterbankTransfer](#bước-3-deploy-smart-contracts)
+   - [3.5: Deploy PKI Registry](#bước-35-deploy-pki-registry-user-management) **⭐ MỚI**
+   - [3.6: Link PKI to InterbankTransfer](#bước-36-link-pki-to-interbanktransfer) **⭐ MỚI**
+   - [3.8: Bật ZKP Balance Proof](#38--bắt-buộc-bật-zkp-balance-proof) **⚠️ BẮT BUỘC**
+   - [3.9: PQC Signature Storage On-Chain](#39-pqc-signature-storage-on-chain-khuyến-nghị)
 7. [Bước 4: Khởi động Web GUI](#bước-4-khởi-động-web-gui)
-8. [Bước 5: Sử dụng Dashboard (All-in-One)](#bước-5-sử-dụng-dashboard-all-in-one) **⭐ CẬP NHẬT**
-9. [Troubleshooting](#troubleshooting)
-10. [Quick Start (Tóm tắt nhanh)](#quick-start-tóm-tắt-nhanh)
-11. [TLS Commands Cheat Sheet](#tls-commands-cheat-sheet)
+8. [Bước 5: Benchmark với Lacchain Ethereum-Benchmark](#bước-5-benchmark-với-lacchain-ethereum-benchmark) **⭐ MỚI**
 
 ---
 
@@ -454,7 +453,7 @@ Chạy script `run.sh` để khởi động tất cả các containers:
 
 **Thời gian chờ:** Khoảng 1-2 phút để tất cả containers khởi động.
 
-**Lưu ý:** Nếu đã setup TLS (Bước 0), blockchain sẽ tự động chạy với HTTPS trên port 8545 và 21001-21004.
+**Lưu ý:** Blockchain chạy với TLS 1.3 (HTTPS) trên port 8545 và 21001-21004.
 
 ### 1.3. Kiểm tra containers đang chạy
 
@@ -498,14 +497,6 @@ curl -k --tlsv1.3 \
 
 **Lưu ý:** Khi TLS enabled, node **CHỈ** accept HTTPS. HTTP sẽ bị lỗi "Empty reply from server".
 
-#### Nếu chưa bật TLS:
-
-```bash
-curl -X POST http://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-```
-
 **Kết quả mong đợi:**
 ```json
 {
@@ -528,7 +519,6 @@ Nếu tất cả tests pass, TLS đã được cấu hình đúng! 🔐
 
 ### 2.2. Kiểm tra block số hiện tại
 
-#### Với TLS:
 ```bash
 curl --cacert config/tls/ca/certs/sbv-root-ca.crt \
   --tlsv1.3 \
@@ -538,19 +528,10 @@ curl --cacert config/tls/ca/certs/sbv-root-ca.crt \
   | python3 -c "import sys, json; print('Block number:', int(json.load(sys.stdin)['result'], 16))"
 ```
 
-#### Không TLS:
-```bash
-curl -X POST http://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-  | python3 -c "import sys, json; print('Block number:', int(json.load(sys.stdin)['result'], 16))"
-```
-
 ### 2.3. Kiểm tra consensus đang hoạt động
 
 Kiểm tra validators:
 
-**Với TLS:**
 ```bash
 curl --cacert config/tls/ca/certs/sbv-root-ca.crt --tlsv1.3 \
   -X POST https://localhost:21001 \
@@ -561,14 +542,6 @@ curl --cacert config/tls/ca/certs/sbv-root-ca.crt --tlsv1.3 \
 # Hoặc insecure mode
 curl -k --tlsv1.3 \
   -X POST https://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"qbft_getValidatorsByBlockNumber","params":["latest"],"id":1}' \
-  | python3 -m json.tool
-```
-
-**Không TLS:**
-```bash
-curl -X POST http://localhost:21001 \
   -H "Content-Type: application/json" \
   --data '{"jsonrpc":"2.0","method":"qbft_getValidatorsByBlockNumber","params":["latest"],"id":1}' \
   | python3 -m json.tool
@@ -638,21 +611,11 @@ Có 2 cách:
 
 Script này sẽ deploy contract và init số dư cho tất cả users:
 
-**Nếu blockchain chạy với TLS (HTTPS):**
-
 ```bash
 # Workaround cho Node.js 22 với self-signed certificates
 export NODE_TLS_REJECT_UNAUTHORIZED=0
 RPC_ENDPOINT=https://localhost:21001 node scripts/public/deploy_and_init.js
 unset NODE_TLS_REJECT_UNAUTHORIZED
-```
-
-**Nếu blockchain chạy không TLS (HTTP):**
-
-```bash
-node scripts/public/deploy_and_init.js
-# Hoặc explicit set endpoint
-RPC_ENDPOINT=http://localhost:21001 node scripts/public/deploy_and_init.js
 ```
 
 **💡 Lưu ý về TLS:**
@@ -725,7 +688,6 @@ BƯỚC 3: CẬP NHẬT GUI CONFIG
 
 Nếu muốn deploy và init riêng:
 
-**Với TLS:**
 ```bash
 # Deploy contract
 export NODE_TLS_REJECT_UNAUTHORIZED=0
@@ -744,23 +706,6 @@ RPC_ENDPOINT=https://localhost:21001 node scripts/public/init_contract.js
 unset NODE_TLS_REJECT_UNAUTHORIZED
 ```
 
-**Không TLS:**
-```bash
-# Deploy contract
-node scripts/public/deploy_interbank.js
-
-# Initialize contract
-# Script tự động đọc address từ InterbankTransfer.address.txt
-node scripts/public/init_contract.js
-
-# Hoặc set explicit address:
-export CONTRACT_ADDRESS=0x...
-node scripts/public/init_contract.js
-
-# Hoặc deposit cho user cụ thể
-node scripts/public/deposit_user.js
-```
-
 **💡 Lưu ý về `init_contract.js`:**
 - Script tự động đọc contract address từ:
   1. Environment variable `CONTRACT_ADDRESS` (ưu tiên cao nhất)
@@ -770,45 +715,7 @@ node scripts/public/deposit_user.js
 - Script kiểm tra PKI enabled status và hiển thị warning nếu cần
 - Script hiển thị contract address đang sử dụng để debug
 
-### 3.5. Deploy lại Contract (nếu có thay đổi)
-
-> **⚠️ QUAN TRỌNG:** Nếu contract code đã thay đổi (ví dụ: thêm withdraw function), cần **deploy lại** contract.
-
-**Khi nào cần deploy lại:**
-- ✅ Thêm function mới (ví dụ: `withdraw()`)
-- ✅ Sửa logic trong contract
-- ✅ Thay đổi struct hoặc mapping
-
-**Cách deploy lại:**
-
-```bash
-cd Besu-hyperledger/smart_contracts
-
-# 1. Compile lại contract
-node scripts/compile.js
-
-# 2. Deploy lại (với TLS)
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/public/deploy_and_init.js
-unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Hoặc không TLS
-RPC_ENDPOINT=http://localhost:21001 node scripts/public/deploy_and_init.js
-```
-
-**Lưu ý:**
-- ⚠️ Deploy lại sẽ tạo contract address MỚI
-- ⚠️ Số dư cũ sẽ KHÔNG được chuyển sang contract mới
-- ⚠️ Cần chạy `init_contract.js` lại để authorize và deposit cho users
-- ✅ Script `deploy_and_init.js` tự động làm cả 2 bước (deploy + init)
-
-**Verify contract có withdraw function:**
-```bash
-# Check ABI có withdraw function không
-cat contracts/InterbankTransfer.json | grep -A 5 '"name":"withdraw"'
-```
-
-### 3.6. Kiểm tra InterbankTransfer đã deploy
+#### 3.4.5. Kiểm tra InterbankTransfer đã deploy
 
 Kiểm tra contract address trong GUI config:
 
@@ -819,8 +726,22 @@ cat ../../GUI/web/config/contracts.ts | grep INTERBANK_TRANSFER_ADDRESS
 Hoặc kiểm tra trực tiếp trên blockchain:
 
 ```bash
+# Từ thư mục smart_contracts, dùng đường dẫn tương đối
 # Thay CONTRACT_ADDRESS bằng address thực tế
-curl -X POST http://localhost:21001 \
+curl --cacert ../config/tls/ca/certs/sbv-root-ca.crt --tlsv1.3 \
+  -X POST https://localhost:21001 \
+  -H "Content-Type: application/json" \
+  --data '{
+    "jsonrpc":"2.0",
+    "method":"eth_getCode",
+    "params":["CONTRACT_ADDRESS", "latest"],
+    "id":1
+  }'
+
+# Hoặc từ thư mục Besu-hyperledger:
+cd ..
+curl --cacert config/tls/ca/certs/sbv-root-ca.crt --tlsv1.3 \
+  -X POST https://localhost:21001 \
   -H "Content-Type: application/json" \
   --data '{
     "jsonrpc":"2.0",
@@ -832,11 +753,11 @@ curl -X POST http://localhost:21001 \
 
 Nếu có code (không phải "0x"), contract đã được deploy! ✅
 
-### 3.7. Deploy PKI Registry
+### 3.5. Deploy PKI Registry
 
 > **⚠️ QUAN TRỌNG:** Bước này **PHẢI** được thực hiện **SAU KHI**:
 > - ✅ Blockchain đã khởi động và sẵn sàng (Bước 1 & 2)
-> - ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.6)
+> - ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.4)
 
 **⭐ Bước mới:** Deploy PKI Registry để quản lý users
 
@@ -863,13 +784,10 @@ cd Besu-hyperledger/smart_contracts
 # Đảm bảo contracts đã được compile
 node scripts/compile.js
 
-# Deploy PKI Registry (với TLS)
+# Deploy PKI Registry
 export NODE_TLS_REJECT_UNAUTHORIZED=0
 RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_pki.js
 unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Hoặc không TLS
-RPC_ENDPOINT=http://localhost:21001 node scripts/deploy_pki.js
 ```
 
 **Expected output:**
@@ -891,6 +809,34 @@ PKI Registry Contract Deployment
 ✅ PKI Registry Deployment Complete!
 ========================================
 ```
+
+**⚠️ QUAN TRỌNG:** Script `deploy_pki.js` chỉ đăng ký 2 test users. Để đăng ký **TẤT CẢ** users (6 users từ GUI), cần:
+
+**Bước 1: Fund users với native ETH (để trả gas fee)**
+
+```bash
+# Cấp 1 ETH cho mỗi user để trả gas fee khi đăng ký
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+RPC_ENDPOINT=https://localhost:21001 node scripts/fund_users_for_pki.js
+unset NODE_TLS_REJECT_UNAUTHORIZED
+```
+
+**Bước 2: Đăng ký tất cả users vào PKI Registry**
+
+```bash
+# Đăng ký 6 users (VCB User 1, VCB User 2, VTB User 1, VTB User 2, BIDV User 1, BIDV User 2)
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+RPC_ENDPOINT=https://localhost:21001 node scripts/register_all_users_pki.js
+unset NODE_TLS_REJECT_UNAUTHORIZED
+```
+
+Script `register_all_users_pki.js` sẽ:
+- ✅ Đăng ký 6 users (tự đăng ký với PQC public key)
+- ✅ Verify KYC cho mỗi user (bởi bank tương ứng)
+- ✅ Set authorization với daily limit 100 ETH
+
+**Nếu gặp lỗi "User not registered" trong GUI:**
+→ Chạy cả 2 scripts: `fund_users_for_pki.js` → `register_all_users_pki.js`
 
 **PKI Features:**
 
@@ -914,22 +860,19 @@ PKI Registry Contract Deployment
 
 **🔒 Security Note:** PKI chỉ lưu HASH của KYC data, KHÔNG lưu CCCD/Passport/PII thật!
 
-### 3.8. Link PKI to InterbankTransfer
+### 3.6. Link PKI to InterbankTransfer
 
 > **⚠️ QUAN TRỌNG:** Bước này **PHẢI** được thực hiện **SAU KHI**:
-> - ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.6)
-> - ✅ PKI Registry contract đã được deploy (Bước 3.7)
+> - ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.4)
+> - ✅ PKI Registry contract đã được deploy (Bước 3.5)
 
 **⭐ Bước quan trọng:** Kết nối PKI vào InterbankTransfer
 
 ```bash
-# Link contracts (với TLS)
+# Link contracts
 export NODE_TLS_REJECT_UNAUTHORIZED=0
 RPC_ENDPOINT=https://localhost:21001 node scripts/link_pki_interbank.js
 unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Hoặc không TLS
-RPC_ENDPOINT=http://localhost:21001 node scripts/link_pki_interbank.js
 ```
 
 **Expected output:**
@@ -958,13 +901,9 @@ Linking PKI Registry to InterbankTransfer
 # Test getting user info và các chức năng PKI
 cd Besu-hyperledger/smart_contracts
 
-# Với TLS
 export NODE_TLS_REJECT_UNAUTHORIZED=0
 RPC_ENDPOINT=https://localhost:21001 node scripts/test_pki.js
 unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Hoặc không TLS
-RPC_ENDPOINT=http://localhost:21001 node scripts/test_pki.js
 ```
 
 **Key tests:**
@@ -977,7 +916,7 @@ RPC_ENDPOINT=http://localhost:21001 node scripts/test_pki.js
 
 **Chi tiết:** Xem [PKI_INTEGRATION_GUIDE.md](../deployment/PKI_INTEGRATION_GUIDE.md)
 
-### 3.9. Verify All Contracts
+### 3.7. Verify All Contracts
 
 ```bash
 # Check InterbankTransfer
@@ -997,6 +936,143 @@ export const PKI_REGISTRY_ADDRESS = '0x...';
 ```
 
 ✅ **Tất cả contracts đã sẵn sàng!**
+
+### 3.8. ⚠️ BẮT BUỘC: Bật ZKP Balance Proof
+
+> **⚠️ QUAN TRỌNG:** ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security cho hệ thống.  
+> Mục tiêu: Chứng minh **balance > amount** mà không tiết lộ giá trị balance thực tế. Bước này thêm BalanceVerifier và ZKP Prover.
+
+**📋 Kiến trúc ZKP (Off-Chain Proof Generation):**
+
+- ✅ **Proof Generation**: Hoàn toàn **OFF-CHAIN** qua Rust Prover Service (Winterfell STARK)
+  - Prover service chạy tại `http://localhost:8081` (REST API)
+  - Proof được tạo **TRƯỚC KHI** gửi transaction lên blockchain
+  - **Không block blockchain nodes**, không làm chậm block commit
+  - Proof generation mất vài giây nhưng không ảnh hưởng đến blockchain performance
+  
+- ✅ **On-Chain Verification**: Chỉ verify proof hash và integrity checks
+  - Contract (`BalanceVerifier.sol`) chỉ kiểm tra proof hash và public inputs
+  - Không thực hiện full STARK verification on-chain (quá tốn gas)
+  - Đảm bảo performance cao cho blockchain
+  
+**Luồng hoạt động:**
+```
+1. Client (GUI) → ZKP Prover API (http://localhost:8081) → Generate Proof (OFF-CHAIN)
+2. Client nhận proof → Gửi transaction với proof hash lên blockchain
+3. Blockchain verify proof hash (ON-CHAIN, nhanh)
+4. Transaction được commit vào block
+```
+
+**Lợi ích:**
+- ✅ **Performance cao**: Proof generation không block blockchain
+- ✅ **Scalability**: Có thể scale prover service độc lập
+- ✅ **Privacy**: Balance không bị tiết lộ trên blockchain
+
+```bash
+# 1) Start ZKP Prover (balance proof)
+cd prover
+cargo build --release
+RUST_LOG=info ./target/release/zkp-prover &
+
+# 2) Deploy BalanceVerifier (on-chain)
+cd ../Besu-hyperledger/smart_contracts
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_balance_verifier.js
+
+# 3) Link vào InterbankTransfer
+RPC_ENDPOINT=https://localhost:21001 node scripts/set_balance_verifier.js
+RPC_ENDPOINT=https://localhost:21001 node scripts/toggle_zkp.js   # enable ZKP flag
+unset NODE_TLS_REJECT_UNAUTHORIZED
+
+# 4) (GUI) đặt endpoint ZKP nếu cần
+cd ../../GUI/web
+echo "NEXT_PUBLIC_ZKP_PROVER_URL=http://localhost:8081" >> .env.local
+```
+
+**Kết quả mong đợi:**
+- ✅ BalanceVerifier deployed và lưu address
+- ✅ InterbankTransfer đã set verifier + bật `zkpEnabled`
+- ✅ ZKP Prover lắng nghe `http://localhost:8081`
+
+### 3.9. PQC Signature Storage On-Chain (Khuyến nghị)
+
+> Mục tiêu: Lưu **PQC signature** (hoặc hash) on-chain cho từng transaction, để có thể audit/verify sau này,  
+> đồng thời tránh vượt giới hạn kích thước contract (EIP‑170) bằng cách tách PQC ra contract riêng.
+
+Thiết kế hiện tại:
+
+- Contract `InterbankTransfer`:
+  - Hàm `transferWithPQC(...)` — Chuyển tiền và (nếu có cấu hình) gọi registry để lưu PQC signature.
+- Contract mới `PQCSignatureRegistry`:
+  - `storePQCSignature(txId, pqcSignature, algorithm)` — Lưu chữ ký PQC on-chain cho một transaction ID.
+  - `getPQCSignatureHash(txId)` — Lấy hash của PQC signature.
+  - `getPQCSignature(txId)` — Lấy full signature + algorithm + hash.
+  - `transactionHasPQCSignature(txId)` — Kiểm tra transaction có PQC signature không.
+
+Workflow:
+
+- GUI gọi `transferWithPQC(...)` trên `InterbankTransfer` (hàm nhỏ, chỉ xử lý business logic + emit event).
+- `InterbankTransfer` sau khi thực hiện transfer sẽ:
+  - Tăng `transactionCounter` để sinh `txId` (chỉ dùng cho event, **không còn lưu mảng transactions** để tiết kiệm gas).
+  - Gọi `PQCSignatureRegistry.storePQCSignature(txId, signature, algorithm)` để lưu signature on-chain.
+- `PQCSignatureRegistry` lưu signature và cho phép truy vấn bằng `txId`:
+  - `getPQCSignatureHash(txId)` — Lấy hash của PQC signature.
+  - `getPQCSignature(txId)` — Lấy full signature + algorithm + hash.
+  - `transactionHasPQCSignature(txId)` — Kiểm tra transaction có PQC signature không.
+
+#### 3.9.1. Triển khai PQCSignatureRegistry (nếu cần)
+
+```bash
+cd Besu-hyperledger/smart_contracts
+
+# Re-compile contracts
+node scripts/compile.js
+
+# (Tuỳ chọn) Deploy PQCSignatureRegistry bằng Remix/Hardhat/Script riêng
+# Sau đó gọi setPQCRegistry(...) trên InterbankTransfer để link registry
+```
+
+#### 3.9.2. Sử dụng PQC signature từ GUI
+
+GUI đã có sẵn helper `transferWithPQC` trong `GUI/web/lib/contract.ts`:
+
+```typescript
+import { transferWithPQC } from '@/lib/contract';
+
+// Ví dụ: chuyển 1.000.000 VND với PQC signature được lưu on-chain
+const result = await transferWithPQC(
+  fromPrivateKey,
+  toAddress,
+  1_000_000,   // amountVND
+  'VCB',       // toBankCode
+  'Thanh toán liên ngân hàng', // description
+  true,        // usePQC
+  'vietcombank'// entityId trong KSM (optional)
+);
+
+console.log('TX hash:', result.txHash, 'TX ID:', result.txId.toString());
+```
+
+**Flow:**
+- GUI gọi `transferWithPQC()`.
+- GUI gọi KSM để `sign()` message → nhận PQC signature (Dilithium3).
+- GUI gửi signature vào `transferWithPQC(...)`.
+- `InterbankTransfer` xử lý business logic và gọi `PQCSignatureRegistry.storePQCSignature(txId, signature, algorithm)`.
+
+#### 3.9.3. Truy vấn PQC signature từ on-chain (PQCSignatureRegistry)
+
+Ví dụ dùng script/web3:
+
+```javascript
+const hash = await pqcRegistry.getPQCSignatureHash(txId);
+const [signature, algorithm, storedHash] = await pqcRegistry.getPQCSignature(txId);
+const hasPQC = await pqcRegistry.transactionHasPQCSignature(txId);
+```
+
+**Use case:**
+- Audit giao dịch sau này
+- Đối chiếu signature off-chain
+- Chuẩn bị cho ZKP nâng cao (DILITHIUM proof)
 
 ---
 
@@ -1027,7 +1103,7 @@ npm install --legacy-peer-deps
 Đảm bảo RPC endpoint đúng trong `config/blockchain.ts`:
 
 ```typescript
-export const RPC_ENDPOINT = process.env.NEXT_PUBLIC_RPC_ENDPOINT || 'http://localhost:21001';
+export const RPC_ENDPOINT = process.env.NEXT_PUBLIC_RPC_ENDPOINT || 'https://localhost:21001';
 ```
 
 Đảm bảo contract address đúng trong `config/contracts.ts`:
@@ -1066,24 +1142,80 @@ Bạn sẽ thấy:
   - 💸 **Transfer functionality** (tích hợp trong Dashboard)
 - Menu điều hướng đầy đủ
 
-### 4.6. Accept TLS Certificate (nếu dùng TLS)
+### 4.6. Accept TLS Certificate (BẮT BUỘC)
 
-Do sử dụng self-signed certificate:
+**⚠️ QUAN TRỌNG:** Do sử dụng self-signed certificate, trình duyệt sẽ từ chối kết nối HTTPS. Bạn **PHẢI** chấp nhận certificate trước khi sử dụng GUI.
 
-**Option 1: Accept trong browser** (khuyên dùng)
-1. Truy cập `https://localhost:21001` trực tiếp
-2. Click "Advanced" → "Accept Risk and Continue"
-3. Quay lại GUI: `http://localhost:3000`
+**Cách 1: Accept trong browser** (Nhanh nhất - Khuyên dùng)
 
-**Option 2: Import CA certificate**
+1. **Mở trình duyệt và truy cập:**
+   ```
+   https://localhost:21001
+   ```
+
+2. **Chấp nhận cảnh báo bảo mật:**
+   - **Chrome/Edge:** "Your connection is not private" → Click **"Advanced"** → **"Proceed to localhost (unsafe)"**
+   - **Firefox:** "Warning: Potential Security Risk Ahead" → Click **"Advanced"** → **"Accept the Risk and Continue"**
+   - **Safari:** "This Connection Is Not Private" → Click **"Show Details"** → **"visit this website"**
+
+3. **Quay lại GUI và refresh:**
+   - Truy cập: `http://localhost:3000`
+   - Nhấn `F5` hoặc `Ctrl+R` để refresh
+
+**✅ Hoàn thành!** Trình duyệt đã tin cậy certificate cho session này.
+
+**Cách 2: Import CA certificate vào hệ thống** (Một lần, lâu dài)
+
+**Linux (Ubuntu/Debian):**
 ```bash
-# Import SBV Root CA vào system
+# Import SBV Root CA vào system trust store
 sudo cp Besu-hyperledger/config/tls/ca/certs/sbv-root-ca.crt \
   /usr/local/share/ca-certificates/sbv-interbank.crt
 sudo update-ca-certificates
 
-# Restart browser để áp dụng
+# Đóng hoàn toàn tất cả cửa sổ trình duyệt và mở lại
 ```
+
+**macOS:**
+```bash
+# Import vào Keychain
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \
+  Besu-hyperledger/config/tls/ca/certs/sbv-root-ca.crt
+
+# Restart browser
+```
+
+**Windows:**
+```powershell
+# Import certificate vào Windows Certificate Store
+certutil -addstore -f "ROOT" Besu-hyperledger\config\tls\ca\certs\sbv-root-ca.crt
+
+# Restart browser
+```
+
+**Lưu ý:**
+- Cách 1: Nhanh nhưng cần làm lại sau mỗi lần restart browser
+- Cách 2: Một lần, hoạt động lâu dài, không cần làm lại
+
+**Kiểm tra đã chấp nhận certificate:**
+Mở browser console (F12) và chạy:
+```javascript
+fetch('https://localhost:21001', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'eth_blockNumber',
+    params: [],
+    id: 1
+  })
+})
+.then(r => r.json())
+.then(d => console.log('✅ Success:', d))
+.catch(e => console.error('❌ Error:', e))
+```
+
+Nếu thấy `✅ Success: {jsonrpc: "2.0", id: 1, result: "0x..."}` → Certificate đã được chấp nhận!
 
 ### 4.7. Chọn ngân hàng và user
 
@@ -1093,664 +1225,297 @@ sudo update-ca-certificates
 
 ---
 
-## Bước 5: Sử dụng Dashboard (All-in-One)
+## Bước 5: Benchmark với Lacchain Ethereum-Benchmark
 
-> **⭐ TÍNH NĂNG MỚI:** Dashboard là trang all-in-one, tích hợp tất cả tính năng:
-> - ✅ Balance & Account Info
-> - ✅ PKI & Security Info (tích hợp, không còn tab riêng)
-> - ✅ Transaction Analytics Chart
-> - ✅ Transfer functionality (tích hợp trong Dashboard)
-> - ✅ Recent Transactions list
-> 
-> **Không còn các trang riêng:** `/transfer` và `/transactions` đã được tích hợp vào Dashboard
+> **⭐ MỚI:** Sử dụng Lacchain Ethereum-Benchmark để đo hiệu năng (TPS, latency) của hệ thống InterbankTransfer.
 
-### 5.1. Access Dashboard
+### 5.1. Giới thiệu Lacchain Ethereum-Benchmark
 
-1. Chọn ngân hàng từ Home page
-2. Dashboard tự động hiển thị với tất cả tính năng:
-   - **Balance Card** (số dư tài khoản)
-   - **PKI & Security Info Card** (bên cạnh balance)
-   - **Transaction Analytics Chart** (biểu đồ giao dịch)
-   - **Stats Cards** (thống kê)
-   - **Recent Transactions** (danh sách giao dịch gần đây)
-   - **Transfer functionality** (tích hợp trong Dashboard)
+**Lacchain Ethereum-Benchmark** là công cụ open-source được thiết kế đặc biệt cho Hyperledger Besu để:
+- ✅ Đo **TPS (Transactions Per Second)**
+- ✅ Đo **Latency** (thời gian phản hồi)
+- ✅ **Stress test** blockchain network
+- ✅ Tự động gửi transactions ở tốc độ cố định
+- ✅ Lưu kết quả vào log files để phân tích
 
-### 5.2. Dashboard Features
+**Ưu điểm:**
+- ✅ Dễ setup (có Docker Compose sẵn)
+- ✅ Phù hợp với Besu
+- ✅ Tự động quản lý nonce
+- ✅ Hỗ trợ HTTPS với TLS
 
-**📊 Balance Card (Top Left - 2 columns):**
-- ✅ Số dư tài khoản (large display)
-- ✅ User address (truncated)
-- ✅ Quick stats: Sent/Received count
-- ✅ Modern emerald gradient design
+### 5.2. Setup Lacchain Benchmark
 
-**🔐 PKI & Security Info Card (Top Right - 1 column):**
-- ✅ **Account Status:** Active/Inactive badge
-- ✅ **KYC Status:** Verified/Not Verified với dates
-- ✅ **Permissions:** Transfer/Receive (Allowed/Denied)
-- ✅ **Daily Limit Progress Bar:**
-  - Current usage / Total limit (ETH)
-  - Visual progress bar với màu động:
-    - 🟢 Green: <70% used
-    - 🟡 Yellow: 70-90% used
-    - 🔴 Red: >90% used
-  - Percentage display
-- ✅ **Quantum-Resistant Badge** (PQC enabled)
-
-**📈 Transaction Analytics Chart (NEW!):**
-- ✅ **Bar Chart** hiển thị 7 ngày gần nhất
-- ✅ **🔴 Red bars:** Chuyển đi (Sent transactions)
-- ✅ **🟢 Green bars:** Nhận về (Received transactions)
-- ✅ **Summary stats:** Total Sent / Total Received
-- ✅ Interactive tooltips
-
-**📊 Stats Cards (4 cards):**
-- ✅ **Completed:** Số giao dịch hoàn tất
-- ✅ **Transfers:** Số giao dịch chuyển đi
-- ✅ **Received:** Số giao dịch nhận về
-- ✅ **Pending:** Số giao dịch đang chờ
-
-**📋 Recent Transactions:**
-- ✅ Danh sách 5 giao dịch gần nhất
-- ✅ Color-coded amounts (đỏ = gửi, xanh = nhận)
-- ✅ Status badges (Completed/Pending/In Progress)
-- ✅ Direction icons (⬆️ = sent, ⬇️ = received)
-
-### 5.3. Test Dashboard Flow
-
-**Scenario: Check Daily Limit After Transfer**
-
-1. Open Dashboard → Check PKI Card → Daily Limit (e.g., 0/100 ETH)
-2. Use Transfer functionality in Dashboard → Create transfer 10 ETH
-3. Submit transaction
-4. Dashboard automatically updates → PKI Card shows updated usage (10/100 ETH used)
-5. Progress bar shows 10% (green)
-
-**Scenario: View Transaction Chart**
-
-1. Open Dashboard
-2. Scroll to "Transaction Analytics" chart
-3. See bar chart với:
-   - 🔴 Red bars = Sent transactions
-   - 🟢 Green bars = Received transactions
-4. Hover over bars để xem chi tiết
-5. Check summary stats at bottom (Total Sent/Received)
-
-**Scenario: View KYC Status**
-
-1. Open Dashboard
-2. Check PKI & Security Info Card (top right)
-3. Verify:
-   - ✅ KYC Status: Verified
-   - ✅ Verified At & Expires At dates
-   - ✅ Permissions: Transfer/Receive allowed
-
-**Scenario: Monitor Transaction Stats**
-
-1. Open Dashboard
-2. View Stats Cards:
-   - Completed count
-   - Transfers count (outgoing)
-   - Received count (incoming)
-   - Pending count
-3. Check Recent Transactions list below
-4. Verify color coding: red = sent, green = received
-
-### 5.4. Dashboard Layout
-
-**Expected UI Layout:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Dashboard                                                    │
-│ Plan, prioritize, and accomplish your tasks with ease.       │
-├─────────────────────────────────────────────────────────────┤
-│ ┌──────────────────────────┐  ┌──────────────────┐          │
-│ │ Balance Card (2 cols)    │  │ PKI Info (1 col) │          │
-│ │ 🟢 Emerald Gradient      │  │ 🔐 PKI & Security│          │
-│ │ 100,000,000 VND          │  │ ✅ Active        │          │
-│ │ 0x6423...e34e            │  │ ✅ KYC Verified  │          │
-│ │ Sent: 5  Received: 3    │  │ Daily Limit: 10% │          │
-│ └──────────────────────────┘  └──────────────────┘          │
-├─────────────────────────────────────────────────────────────┤
-│ Stats Cards (4 cards)                                        │
-│ [Completed: 12] [Transfers: 5] [Received: 3] [Pending: 2]   │
-├─────────────────────────────────────────────────────────────┤
-│ Transaction Analytics Chart                                  │
-│ ┌──────────────────────────────────────────────────────┐    │
-│ │  Bar Chart (7 days)                                   │    │
-│ │  🔴 Red = Sent    🟢 Green = Received                │    │
-│ │  [Mon] [Tue] [Wed] [Thu] [Fri] [Sat] [Sun]          │    │
-│ │  Total Sent: 50,000,000 VND                           │    │
-│ │  Total Received: 30,000,000 VND                      │    │
-│ └──────────────────────────────────────────────────────┘    │
-├─────────────────────────────────────────────────────────────┤
-│ Recent Transactions                                          │
-│ ┌──────────────────────────────────────────────────────┐    │
-│ │ ⬆️ Chuyển tiền    -10,000,000 VND  [Completed]      │    │
-│ │ ⬇️ Nhận tiền      +5,000,000 VND   [Completed]      │    │
-│ │ ...                                                 │    │
-│ └──────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 5.5. Troubleshooting Dashboard
-
-**Issue: "User not registered in PKI Registry"**
-```bash
-# Solution: Deploy PKI and register users
-cd Besu-hyperledger/smart_contracts
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_pki.js
-```
-
-**Issue: "PKI Registry not found" hoặc PKI Card không hiển thị**
-```bash
-# Solution: Link PKI to InterbankTransfer
-node scripts/link_pki_interbank.js
-```
-
-**Issue: Profile shows "Loading..." forever**
-```bash
-# Check blockchain is running
-docker ps | grep besu
-
-# Check PKI contract deployed
-cat smart_contracts/contracts/PKIRegistry.address.txt
-
-# Check browser console (F12) for errors
-```
-
----
-
-## Troubleshooting
-
-### ❌ Blockchain không khởi động
-
-**Lỗi:** `docker-compose up` fails
-
-**Giải pháp:**
-```bash
-# Kiểm tra ports có bị chiếm không
-netstat -tuln | grep -E '21001|21002|21003|21004'
-
-# Dừng và xóa containers cũ
-cd Besu-hyperledger
-docker-compose down -v
-
-# Xóa images cũ (nếu cần)
-docker-compose down --rmi all
-
-# Chạy lại
-./run.sh
-```
-
-### ❌ RPC endpoint không phản hồi
-
-**Lỗi 1:** `curl: (7) Failed to connect to localhost:21001`
-
-**Giải pháp:**
-```bash
-# Kiểm tra container có đang chạy không
-docker ps | grep sbv
-
-# Xem logs của container
-docker logs besu-hyperledger-sbv-1
-
-# Đợi thêm vài phút để blockchain khởi động hoàn toàn
-sleep 60
-curl -X POST http://localhost:21001 ...
-```
-
-**Lỗi 2:** `curl: (52) Empty reply from server`
-
-**Nguyên nhân:** Node chạy với TLS (HTTPS only) nhưng bạn dùng HTTP
-
-**Giải pháp:**
-```bash
-# Kiểm tra TLS có enabled không
-docker logs besu-hyperledger-sbv-1 2>&1 | grep "TLS enabled"
-
-# Nếu thấy "with TLS enabled", dùng HTTPS:
-curl -k --tlsv1.3 \
-  -X POST https://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
-# Hoặc với CA cert:
-curl --cacert config/tls/ca/certs/sbv-root-ca.crt --tlsv1.3 \
-  -X POST https://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-```
-
-### ❌ Contract deploy thất bại
-
-**Lỗi 1:** `Cannot connect to RPC` hoặc `Empty reply from server`
-
-**Nguyên nhân:** Blockchain chạy với TLS nhưng script dùng HTTP
-
-**Giải pháp:**
-```bash
-# Option 1: Deploy với HTTPS (Recommended)
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/public/deploy_and_init.js
-unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Option 2: Kiểm tra xem node có HTTP port không
-docker ps | grep besu
-# Nếu không có HTTP, phải dùng HTTPS
-
-# Option 3: Test connection trước
-NODE_TLS_REJECT_UNAUTHORIZED=0 RPC_ENDPOINT=https://localhost:21001 \
-  node scripts/test_tls_connection.js
-```
-
-**Lỗi 2:** `transaction execution reverted` hoặc `insufficient funds`
-
-**Giải pháp:**
-```bash
-# Kiểm tra blockchain đã sẵn sàng
-# Với TLS:
-curl --cacert config/tls/ca/certs/sbv-root-ca.crt \
-  -X POST https://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
-# Không TLS:
-curl -X POST http://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
-# Kiểm tra account có ETH không (trong genesis)
-# Deploy lại với gas limit cao hơn nếu cần
-```
-
-**Lỗi 3:** `init_contract.js` dùng contract address cũ thay vì address mới
-
-**Nguyên nhân:** Script đọc address từ file cũ hoặc env var không được set
-
-**Giải pháp:**
-```bash
-# Option 1: Dùng deploy_and_init.js (tự động sync address)
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/public/deploy_and_init.js
-unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Option 2: Set explicit CONTRACT_ADDRESS env var
-export CONTRACT_ADDRESS=0x...  # Address mới vừa deploy
-RPC_ENDPOINT=https://localhost:21001 node scripts/public/init_contract.js
-
-# Option 3: Kiểm tra và update file address
-cat contracts/InterbankTransfer.address.txt  # Xem address hiện tại
-# Nếu sai, update file hoặc dùng env var
-
-# Option 4: Script tự động đọc từ file, đảm bảo file đúng
-# Sau khi deploy, file sẽ được tự động update
-```
-
-**Lỗi 3:** `self-signed certificate in certificate chain`
-
-**Nguyên nhân:** Node.js 22 strict về TLS certificates
-
-**Giải pháp:**
-```bash
-# Dùng workaround (development only!)
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-# ... deploy commands ...
-unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Chi tiết: smart_contracts/DEPLOY_WITH_TLS.md
-```
-
-**Lỗi 4:** `transaction execution reverted` khi authorize hoặc deposit
-
-**Nguyên nhân có thể:**
-- PKI enabled nhưng users chưa được register trong PKI Registry
-- Contract address không đúng
-- Gas limit không đủ
-
-**Giải pháp:**
-```bash
-# 1. Kiểm tra PKI status
-# Script init_contract.js sẽ hiển thị "PKI Enabled: true/false"
-# Nếu PKI enabled, cần register users trước
-
-# 2. Nếu PKI enabled, disable tạm thời để init:
-# (Chỉ dùng khi init lần đầu, sau đó enable lại)
-# Trong InterbankTransfer contract:
-# togglePKI(false)  # Disable PKI
-# ... init users ...
-# togglePKI(true)   # Enable PKI lại
-
-# 3. Hoặc register users trong PKI trước khi init:
-cd smart_contracts
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_pki.js
-# Sau đó init contract
-
-# 4. Kiểm tra contract address đúng:
-# Script sẽ hiển thị "📋 Using Contract Address: 0x..."
-# Verify address này match với address vừa deploy
-
-# 5. Tăng gas limit nếu cần:
-# Edit init_contract.js, tăng gasLimit trong transaction options
-```
-
-### ❌ Web GUI không kết nối được blockchain
-
-**Lỗi:** Balance = 0 hoặc "Network error"
-
-**Giải pháp:**
-1. Kiểm tra RPC endpoint trong `config/blockchain.ts`
-2. Kiểm tra contract address trong `config/contracts.ts`
-3. Kiểm tra CORS (nếu có)
-4. Xem console log trong browser (F12)
-
-### ❌ Mock Mode đang bật
-
-**Triệu chứng:** Transactions không thực sự lên blockchain
-
-**Giải pháp:**
-Kiểm tra và tắt Mock Mode trong `config/blockchain.ts`:
-
-```typescript
-export const MOCK_MODE = false; // Đổi từ true thành false
-```
-
-Sau đó restart web dev server.
-
-### ❌ KSM Service build failed
-
-**Lỗi:** `cannot find symbol: class IPQCCryptoService` hoặc compilation errors
-
-**Nguyên nhân:** Code structure issue với duplicate packages
-
-**Giải pháp:**
+**Lacchain đã được clone và cấu hình sẵn trong project:**
 
 ```bash
-cd ksm
-
-# 1. Kiểm tra không có folder pqc duplicate
-ls -la src/main/java/com/nt219/
-# Chỉ nên có folder "ksm", KHÔNG có folder "pqc"
-
-# 2. Nếu có folder pqc, xóa đi:
-rm -rf src/main/java/com/nt219/pqc
-
-# 3. Rebuild
-cd ../Besu-hyperledger
-docker-compose build ksm
-
-# 4. Start lại
-docker-compose up -d ksm
-
-# 5. Verify
-curl http://localhost:8080/ksm/health
+cd ethereum-benchmark
 ```
 
-**Lưu ý:** Tất cả PQC code phải nằm trong package `com.nt219.ksm.crypto`, KHÔNG phải `com.nt219.pqc.crypto`.
+**Cấu trúc:**
+- `docker-compose.interbank.yml` - Config cho InterbankTransfer
+- `RUN_BENCHMARK.sh` - Script tự động chạy benchmark
+- `server/` - Code benchmark server
+- `server/logs/` - Kết quả benchmark
 
-### ❌ KSM Service không khởi động
+### 5.3. Chuẩn bị trước khi benchmark
 
-**Lỗi:** Container `ksm-service` exit ngay sau khi start
+**⚠️ QUAN TRỌNG:** Trước khi chạy benchmark, cần:
 
-**Giải pháp:**
+1. **Blockchain đang chạy:**
+   ```bash
+   cd Besu-hyperledger
+   docker ps | grep besu
+   ```
+
+2. **Contract đã deploy:**
+   ```bash
+   cat smart_contracts/contracts/InterbankTransfer.address.txt
+   ```
+
+3. **Tắt PKI/ZKP (khuyến nghị):**
+   ```bash
+   cd smart_contracts
+   export NODE_TLS_REJECT_UNAUTHORIZED=0
+   RPC_ENDPOINT=https://localhost:21001 node scripts/public/toggle_pki.js false
+   RPC_ENDPOINT=https://localhost:21001 node scripts/toggle_zkp.js false
+   unset NODE_TLS_REJECT_UNAUTHORIZED
+   ```
+   
+   **Lý do:** PKI/ZKP sẽ làm chậm transactions và ảnh hưởng đến kết quả benchmark.
+
+4. **Fund accounts cho benchmark (BẮT BUỘC cho multi-user benchmark):**
+   
+   **⭐ MỚI:** Để chạy benchmark với nhiều users (10+ TPS), cần fund nhiều accounts trước:
+   
+   ```bash
+   cd ethereum-benchmark
+   ./prepare-benchmark.sh 100 10
+   ```
+   
+   **Script này sẽ:**
+   - ✅ Kiểm tra blockchain đang chạy
+   - ✅ Kiểm tra contract address
+   - ✅ Cài đặt dependencies nếu cần
+   - ✅ Fund 100 accounts với 10 ETH mỗi account
+   - ✅ Tổng cần: 1000 ETH từ owner account
+   
+   **Tham số:**
+   - `100` - Số lượng accounts cần fund
+   - `10` - Số ETH mỗi account
+   
+   **Lưu ý:**
+   - Owner account cần có đủ ETH (≥1000 ETH cho 100 accounts)
+   - Có thể giảm số accounts nếu không đủ ETH: `./prepare-benchmark.sh 50 10`
+   - Script chỉ cần chạy 1 lần, accounts sẽ được fund và sẵn sàng cho các lần benchmark sau
+   
+   **Lacchain tự động:**
+   - Generate random accounts cho mỗi transaction
+   - Mỗi transaction sẽ dùng một account khác nhau
+   - Tự động quản lý nonce cho mỗi account
+
+### 5.4. Chạy Benchmark
+
+**Cách 1: Sử dụng script tự động (Khuyên dùng)**
+
+**Benchmark cơ bản (1 TPS):**
+```bash
+cd ethereum-benchmark
+
+# Chạy benchmark với TPS mặc định (1 tx/s) trong 1 phút
+./RUN_BENCHMARK.sh
+
+# Hoặc chỉ định TPS và thời gian
+./RUN_BENCHMARK.sh 5 2  # 5 TPS trong 2 phút
+```
+
+**⭐ Benchmark với nhiều users (10+ TPS):**
+
+**Bước 1: Fund accounts (chỉ cần làm 1 lần)**
+```bash
+cd ethereum-benchmark
+./prepare-benchmark.sh 100 10
+```
+→ Fund 100 accounts với 10 ETH mỗi account
+
+**Bước 2: Chạy benchmark 10 TPS**
+```bash
+./RUN_BENCHMARK.sh 10 2
+```
+→ 10 TPS trong 2 phút (~1200 transactions)
+→ Mỗi transaction dùng một account khác nhau
+
+**Kết quả mong đợi:**
+- TPS: ~10 tx/s
+- Success rate: 100% (nếu accounts đã được fund)
+- Latency: 10-15 giây (do QBFT consensus)
+- Số transactions: ~1200 transactions trong 2 phút
+
+**Cách 2: Sử dụng Docker Compose trực tiếp**
 
 ```bash
-# Xem logs để tìm lỗi
-docker logs ksm-service
+cd ethereum-benchmark
 
-# Nếu là port conflict (port 8080 đang dùng):
-sudo netstat -tuln | grep 8080
-# Kill process đang dùng hoặc đổi port trong docker-compose.yml
-
-# Nếu là Java error:
-# Rebuild với clean:
-docker-compose down
-docker-compose build --no-cache ksm
-docker-compose up -d ksm
+# Sửa contract address trong docker-compose.interbank.yml nếu cần
+# Sau đó chạy:
+docker-compose -f docker-compose.interbank.yml up --build
 ```
 
-### ❌ KSM API trả về 500 Internal Server Error
+### 5.5. Cấu hình Benchmark
 
-**Lỗi:** `curl http://localhost:8080/ksm/generateKey` trả về error
+**File:** `docker-compose.interbank.yml`
 
-**Giải pháp:**
+**Các tham số quan trọng:**
+
+```yaml
+environment:
+  - DESIRED_RATE_TX=1          # TPS (transactions per second)
+  - TEST_TIME_MINUTES=1        # Thời gian test (phút)
+  - RPC_URL=https://localhost:21001  # Besu RPC endpoint
+  - MAX_GAS_PER_TX=300000      # Gas limit cho mỗi transaction
+  - INTERBANK_CONTRACT_ADDRESS=0x...  # Contract address
+  - TO_ADDRESS=0x...           # Địa chỉ nhận
+  - AMOUNT_WEI=1000000000000000  # Số tiền chuyển (wei)
+  - TO_BANK_CODE=VCB           # Mã ngân hàng nhận
+```
+
+**Khuyến nghị:**
+- **TPS thấp (1-5):** Để test ổn định, không gây nghẽn, không cần fund accounts
+- **TPS trung bình (10-20):** Để test hiệu năng thực tế, **CẦN fund accounts trước** (`./prepare-benchmark.sh`)
+- **TPS cao (50+):** Để stress test, có thể gây nonce issues, cần fund nhiều accounts hơn
+
+**⭐ Multi-User Benchmark:**
+- Lacchain tự động generate random accounts cho mỗi transaction
+- Mỗi transaction dùng một account khác nhau → tránh nonce congestion
+- Cần fund accounts trước khi chạy benchmark 10+ TPS
+- Script tự động quản lý nonce cho mỗi account
+
+### 5.6. Xem kết quả Benchmark
+
+**Kết quả được lưu trong:** `server/logs/`
+
+**Các file log:**
+- `*-stimulus` - Thời gian gửi transactions
+- `*-response` - Thời gian nhận receipts
+
+**Xem kết quả:**
 
 ```bash
-# 1. Kiểm tra logs chi tiết
-docker logs ksm-service --tail 50
+cd ethereum-benchmark/server/logs
+ls -lh
 
-# 2. Kiểm tra request format đúng:
-curl -X POST http://localhost:8080/ksm/generateKey \
-  -H "Content-Type: application/json" \
-  -d '{"entityId":"testbank","algorithm":"Dilithium3"}'
-
-# 3. Restart service
-docker-compose restart ksm
-
-# 4. Nếu vẫn lỗi, check Java heap:
-# Edit docker-compose.yml, thêm:
-# environment:
-#   - JAVA_OPTS=-Xmx512m -Xms256m
+# Xem nội dung log
+cat *-response | head -20
 ```
 
-### ❌ TLS connection failed
-
-**Lỗi:** `certificate verify failed` hoặc `SSL handshake failed`
-
-**Giải pháp:**
-
-1. **Kiểm tra TLS đã được setup:**
-```bash
-cd Besu-hyperledger
-ls -lh config/tls/ca/certs/sbv-root-ca.crt
+**Format log:**
+```
+timestamp_ms,transaction_number
+1234567890,1
+1234567891,2
+...
 ```
 
-2. **Chạy test TLS:**
-```bash
-./scripts/test_tls.sh
-```
+**Phân tích kết quả:**
 
-3. **Nếu certificate chưa có, tạo lại:**
-```bash
-./scripts/generate_tls13_certs.sh
-./scripts/generate_node_configs.sh
-docker-compose restart
-```
+1. **TPS thực tế:**
+   ```bash
+   # Đếm số transactions trong log
+   wc -l *-response
+   ```
 
-4. **Import Root CA vào system (nếu cần):**
-```bash
-sudo cp config/tls/ca/certs/sbv-root-ca.crt /usr/local/share/ca-certificates/
-sudo update-ca-certificates
-```
+2. **Latency trung bình:**
+   - Tính chênh lệch giữa `stimulus` và `response`
+   - Latency = response_time - stimulus_time
 
-5. **Xem logs để debug:**
-```bash
-docker logs rpcnode 2>&1 | grep -E "TLS|SSL|certificate"
-```
+3. **Success rate:**
+   - So sánh số transactions gửi vs số receipts nhận được
 
-### ❌ Besu node không khởi động với TLS
+### 5.7. Troubleshooting Benchmark
 
-**Lỗi:** `Unknown options in TOML configuration`
+**Lỗi: "Transaction nonce is too distant"**
+- **Nguyên nhân:** TPS quá cao, nonce không kịp sync
+- **Giải pháp:** Giảm `DESIRED_RATE_TX` xuống 1-5 TPS
 
-**Giải pháp:**
+**Lỗi: "execution reverted"**
+- **Nguyên nhân:** PKI/ZKP enabled hoặc account không đủ balance
+- **Giải pháp:** 
+  - Tắt PKI/ZKP: `node scripts/public/toggle_pki.js false`
+  - Fund accounts: `./prepare-benchmark.sh 100 10`
 
-1. **Kiểm tra config-tls.toml:**
-```bash
-cat config/nodes/rpcnode/config-tls.toml | grep tls
-```
+**Lỗi: "insufficient funds" hoặc "out of gas"**
+- **Nguyên nhân:** Accounts chưa được fund với ETH
+- **Giải pháp:** Chạy `./prepare-benchmark.sh` để fund accounts trước khi benchmark
 
-2. **Xem logs chi tiết:**
-```bash
-docker logs rpcnode --tail 50
-```
+**Lỗi: "Connection refused"**
+- **Nguyên nhân:** Blockchain chưa chạy hoặc RPC URL sai
+- **Giải pháp:** Kiểm tra `docker ps` và `RPC_URL` trong docker-compose
 
-3. **Nếu vẫn lỗi, chạy lại script:**
-```bash
-./scripts/generate_node_configs.sh
-docker-compose restart
-```
+**Lỗi: "Certificate verification failed"**
+- **Nguyên nhân:** Self-signed certificate không được chấp nhận
+- **Giải pháp:** Đảm bảo `NODE_TLS_REJECT_UNAUTHORIZED=0` trong docker-compose
 
-**Chi tiết troubleshooting TLS:** Xem [TLS13_SETUP_GUIDE.md](../deployment/TLS13_SETUP_GUIDE.md#troubleshooting)
+### 5.8. Best Practices
 
----
+1. **Bắt đầu với TPS thấp:**
+   - Bắt đầu với 1 TPS trong 1 phút
+   - Tăng dần nếu hệ thống ổn định
+   - Không cần fund accounts cho TPS thấp (1-5)
 
-## Quick Start (Tóm tắt nhanh)
+2. **Fund accounts cho benchmark cao (10+ TPS):**
+   - Chạy `./prepare-benchmark.sh 100 10` trước khi benchmark
+   - Đảm bảo owner account có đủ ETH (≥1000 ETH cho 100 accounts)
+   - Có thể giảm số accounts nếu không đủ ETH
 
-### 🔐 Quick Start với TLS 1.3 + PQC + PKI (Full Security - Khuyên dùng)
+3. **Tắt PKI/ZKP khi benchmark:**
+   - PKI/ZKP sẽ làm chậm transactions
+   - Benchmark để đo hiệu năng blockchain, không phải security features
 
-Copy-paste các lệnh sau để chạy nhanh với bảo mật đầy đủ:
+4. **Monitor blockchain trong khi benchmark:**
+   ```bash
+   # Xem logs của Besu nodes
+   docker logs besu-hyperledger-sbv-1 --tail 50 -f
+   ```
 
-```bash
-# 0A. Thiết lập TLS 1.3
-cd Besu-hyperledger
-./scripts/generate_tls13_certs.sh
-./scripts/generate_node_configs.sh
+5. **Chạy nhiều lần để có kết quả chính xác:**
+   - Chạy benchmark 3-5 lần với cùng config
+   - Lấy giá trị trung bình
 
-# 0B. Build KSM service (lần đầu hoặc khi code thay đổi)
-docker-compose build ksm
+6. **Lưu kết quả:**
+   - Backup log files sau mỗi lần benchmark
+   - Ghi chú config đã dùng (TPS, thời gian, PKI/ZKP status, số accounts)
 
-# 1. Khởi động blockchain + KSM
-docker-compose up -d
+7. **Multi-User Benchmark:**
+   - Sử dụng nhiều accounts để tránh nonce congestion
+   - Lacchain tự động generate và quản lý accounts
+   - Mỗi transaction dùng một account khác nhau → hiệu năng cao hơn
 
-# Đợi 1-2 phút, sau đó kiểm tra:
-./scripts/test_tls.sh
-curl http://localhost:8080/ksm/health
+### 5.9. So sánh với Caliper
 
-# Generate PQC keys cho banks
-curl -X POST http://localhost:8080/ksm/generateKey \
-  -H "Content-Type: application/json" \
-  -d '{"entityId":"vietcombank"}'
+**Lacchain vs Caliper:**
 
-curl -X POST http://localhost:8080/ksm/generateKey \
-  -H "Content-Type: application/json" \
-  -d '{"entityId":"vietinbank"}'
+| **Tiêu chí** | **Lacchain** | **Caliper** |
+|-------------|-------------|-------------|
+| Setup | ⭐⭐⭐ Dễ (5-10 phút) | ⭐⭐ Trung bình (15-30 phút) |
+| Besu Support | ✅✅✅ Rất tốt | ✅✅ Tốt |
+| Docker Support | ✅ Có sẵn | ⚠️ Cần config |
+| Nonce Management | ✅ Tự động | ⚠️ Cần config |
+| TPS Measurement | ✅ Tự động | ✅ Tự động |
+| Latency Measurement | ✅ Tự động | ✅ Tự động |
+| Report Generation | ✅ Log files | ✅ HTML report |
+| Multi-Account | ✅ Hỗ trợ | ✅ Hỗ trợ |
 
-curl -X POST http://localhost:8080/ksm/generateKey \
-  -H "Content-Type: application/json" \
-  -d '{"entityId":"bidv"}'
-
-# 2. Deploy contracts (với TLS)
-cd smart_contracts
-npm install --legacy-peer-deps  # Chỉ cần chạy 1 lần
-
-# Compile contracts
-node scripts/compile.js
-
-# Deploy InterbankTransfer (tự động init authorize + deposit)
-# Script sẽ tự động:
-# - Deploy contract
-# - Lưu address vào InterbankTransfer.address.txt
-# - Authorize tất cả bank addresses
-# - Deposit 100 ETH cho mỗi user
-# - Update GUI config
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/public/deploy_and_init.js
-
-# Deploy PKI Registry ⭐ MỚI
-RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_pki.js
-
-# Link PKI to InterbankTransfer ⭐ MỚI  
-RPC_ENDPOINT=https://localhost:21001 node scripts/link_pki_interbank.js
-unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# 3. Chạy web GUI
-cd ../../GUI/web
-npm install --legacy-peer-deps  # Chỉ cần chạy 1 lần
-npm run dev
-
-# 4. Mở browser: http://localhost:3000
-# 5. Explore: Home → Dashboard (tất cả tính năng trong một trang)
-```
-
-**✅ Hoàn thành! Bạn có đầy đủ:**
-- 🔐 TLS 1.3 (RSA 4096 + AES-GCM)
-- 🔑 PQC Signatures (Dilithium3)
-- 👤 PKI Registry (KYC + Daily Limits)
-- 📊 User Profile Page
-
-**⚠️ Lưu ý về TLS:**
-- `NODE_TLS_REJECT_UNAUTHORIZED=0` chỉ dùng cho development với self-signed certificates
-- Production: dùng proper CA-signed certificates hoặc import CA vào system trust store
-- Chi tiết: `smart_contracts/DEPLOY_WITH_TLS.md`
-
-### Quick Start không TLS/PQC (Đơn giản nhất)
-
-```bash
-# 1. Khởi động blockchain only
-cd Besu-hyperledger
-./run.sh
-
-# Đợi 1-2 phút, sau đó kiểm tra:
-curl -X POST http://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
-# 2. Deploy contracts
-cd smart_contracts
-npm install --legacy-peer-deps  # Chỉ cần chạy 1 lần
-
-# Compile
-node scripts/compile.js
-
-# Deploy InterbankTransfer
-node scripts/public/deploy_and_init.js
-
-# Deploy PKI Registry (optional nhưng khuyên dùng) ⭐
-RPC_ENDPOINT=http://localhost:21001 node scripts/deploy_pki.js
-
-# Link PKI (nếu đã deploy PKI) ⭐
-RPC_ENDPOINT=http://localhost:21001 node scripts/link_pki_interbank.js
-
-# 3. Chạy web GUI
-cd ../../GUI/web
-npm install --legacy-peer-deps  # Chỉ cần chạy 1 lần
-npm run dev
-
-# 4. Mở browser: http://localhost:3000
-# 5. Explore: Home → Dashboard (tất cả tính năng trong một trang)
-```
-
-### Quick Start với PQC (Không TLS)
-
-Nếu chỉ muốn test PQC mà không cần TLS:
-
-```bash
-# 1. Build và khởi động KSM + Blockchain
-cd Besu-hyperledger
-docker-compose build ksm
-docker-compose up -d
-
-# 2. Generate PQC keys
-curl -X POST http://localhost:8080/ksm/generateKey \
-  -H "Content-Type: application/json" \
-  -d '{"entityId":"vietcombank"}'
-
-curl -X POST http://localhost:8080/ksm/generateKey \
-  -H "Content-Type: application/json" \
-  -d '{"entityId":"vietinbank"}'
-
-# 3. Test PQC signing
-curl -X POST http://localhost:8080/ksm/sign \
-  -H "Content-Type: application/json" \
-  -d '{"entityId":"vietcombank","message":"Test transaction"}'
-
-# 4. Deploy contract và chạy GUI (như trên)
-cd smart_contracts
-node scripts/public/deploy_and_init.js
-cd ../../GUI/web
-npm run dev
-```
+**Kết luận:** Lacchain phù hợp hơn cho Besu, dễ setup và ít lỗi nonce hơn Caliper.
 
 ---
 
 ## 📝 Lưu ý quan trọng
 
 1. **Thứ tự thực hiện:** 
-   - **Full Security:** TLS Setup (0A) → PQC/KSM Setup (0B) → **Blockchain (1)** → Deploy InterbankTransfer (3.1-3.6) → **Deploy PKI Registry (3.7)** → Link PKI (3.8) → Web GUI (4)
-   - **Đơn giản:** **Blockchain (1)** → Deploy InterbankTransfer (3.1-3.6) → **Deploy PKI Registry (3.7)** → Link PKI (3.8) → Web GUI (4)
-   - **⚠️ QUAN TRỌNG:** Blockchain **PHẢI** chạy trước khi deploy bất kỳ contract nào (bao gồm PKI Registry)!
-   - **⚠️ Deploy lại Contract:** Nếu contract code thay đổi (ví dụ: thêm withdraw function), cần deploy lại (Bước 3.6)
+   - TLS Setup (0A) → PQC/KSM Setup (0B) → **Blockchain (1)** → Deploy InterbankTransfer (3.1-3.4) → **Deploy PKI Registry (3.5)** → Link PKI (3.6) → **Deploy ZKP Balance Proof (3.8)** ⚠️ → Web GUI (4) → **Benchmark (5)** ⭐
+   - **⚠️ QUAN TRỌNG:** 
+     - Blockchain **PHẢI** chạy trước khi deploy bất kỳ contract nào (bao gồm PKI Registry và ZKP)!
+     - ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security!
 2. **Thời gian chờ:** Blockchain cần 1-2 phút để khởi động hoàn toàn
 3. **Contract address:** 
    - Mỗi lần deploy sẽ có address mới, script sẽ tự động cập nhật GUI config
@@ -1781,13 +1546,26 @@ npm run dev
      - ✅ Hiển thị contract address đang sử dụng để debug
      - ✅ Better error handling và logging
    - **Contract address management:** Scripts tự động sync address, không cần manual update
-8. **PKI Registry:**
+8. **⚠️ ZKP Balance Proof (BẮT BUỘC):**
+   - **⚠️ QUAN TRỌNG:** ZKP là bắt buộc để đảm bảo privacy và security
+   - Start prover: `cd prover && cargo build --release && RUST_LOG=info ./target/release/zkp-prover &`
+   - Deploy verifier: `RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_balance_verifier.js`
+   - Link & enable: `node scripts/set_balance_verifier.js`, `node scripts/toggle_zkp.js`
+   - GUI endpoint: set `NEXT_PUBLIC_ZKP_PROVER_URL=http://localhost:8081`
+   - **Chi tiết:** Xem [ZKP_IMPLEMENTATION.md](../../ZKP_IMPLEMENTATION.md)
+9. **PKI Registry:**
    - **⚠️ Thứ tự quan trọng:** PKI Registry **PHẢI** được deploy **SAU KHI** blockchain đã chạy và InterbankTransfer đã được deploy
    - Deploy PKI: `node scripts/deploy_pki.js` (sau Bước 1 & 2)
    - Link PKI: `node scripts/link_pki_interbank.js` (sau khi cả 2 contracts đã deploy)
    - Test PKI: `node scripts/test_pki.js` (optional, để verify)
    - **Chi tiết:** Xem [PKI_INTEGRATION_GUIDE.md](../deployment/PKI_INTEGRATION_GUIDE.md)
-9. **Bảo mật:** 
+10. **Benchmarking:**
+   - Sử dụng **Lacchain Ethereum-Benchmark** để đo TPS và latency
+   - Setup: `cd ethereum-benchmark && ./RUN_BENCHMARK.sh`
+   - Khuyến nghị: Tắt PKI/ZKP khi benchmark để có kết quả chính xác
+   - Kết quả lưu trong `server/logs/`
+   - **Chi tiết:** Xem [Bước 5: Benchmark với Lacchain Ethereum-Benchmark](#bước-5-benchmark-với-lacchain-ethereum-benchmark)
+11. **Bảo mật:** 
    - Password mặc định của keystores là `changeit` - đổi trong production!
    - Root CA private key được mã hóa tại `config/tls/ca/private/sbv-root-ca.key`
    - PQC private keys lưu trong memory - cần HSM trong production
@@ -1819,155 +1597,6 @@ npm run dev
 
 ---
 
-## 🔐 TLS Commands Cheat Sheet
-
-### Quick Reference: HTTP vs HTTPS
-
-**⚠️ Quan trọng:** Khi blockchain chạy với TLS, node **CHỈ ACCEPT HTTPS**, không accept HTTP!
-
-| Scenario | Endpoint | Example |
-|----------|----------|---------|
-| **With TLS** | `https://localhost:21001` | `curl -k --tlsv1.3 -X POST https://localhost:21001 ...` |
-| **Without TLS** | `http://localhost:21001` | `curl -X POST http://localhost:21001 ...` |
-
-### Check if TLS is enabled
-
-```bash
-docker logs besu-hyperledger-sbv-1 2>&1 | grep "TLS enabled"
-
-# If you see: "JSON-RPC service started ... with TLS enabled"
-# → Use HTTPS
-```
-
-### curl Commands with TLS
-
-```bash
-# Option 1: Secure (với CA certificate)
-curl --cacert config/tls/ca/certs/sbv-root-ca.crt --tlsv1.3 \
-  -X POST https://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
-# Option 2: Quick test (insecure - skip cert verification)
-curl -k --tlsv1.3 \
-  -X POST https://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-```
-
-### Node.js Scripts with TLS
-
-```bash
-# Deploy contract với TLS
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/public/deploy_and_init.js
-unset NODE_TLS_REJECT_UNAUTHORIZED
-
-# Check balance với TLS
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-RPC_ENDPOINT=https://localhost:21001 node scripts/public/check_balance.js
-unset NODE_TLS_REJECT_UNAUTHORIZED
-```
-
-### Test Scripts
-
-```bash
-# Test TLS connection
-cd smart_contracts
-NODE_TLS_REJECT_UNAUTHORIZED=0 RPC_ENDPOINT=https://localhost:21001 \
-  node scripts/test_tls_connection.js
-
-# Test blockchain TLS setup
-cd ..
-./scripts/test_tls.sh
-
-# Test KSM service
-curl http://localhost:8080/ksm/health
-
-# Test PKI Registry ⭐ MỚI
-cd smart_contracts
-node scripts/test_pki.js
-```
-
-### PKI Commands ⭐ MỚI
-
-```bash
-# Deploy PKI Registry
-cd smart_contracts
-RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_pki.js
-
-# Link PKI to InterbankTransfer
-RPC_ENDPOINT=https://localhost:21001 node scripts/link_pki_interbank.js
-
-# Test PKI functionality
-node scripts/test_pki.js
-
-# Check user KYC status
-curl -k -X POST https://localhost:21001 \
-  -H "Content-Type: application/json" \
-  --data '{
-    "jsonrpc":"2.0",
-    "method":"eth_call",
-    "params":[{
-      "to":"PKI_REGISTRY_ADDRESS",
-      "data":"0x..."
-    },"latest"],
-    "id":1
-  }'
-
-# Register new user (from user wallet)
-# See: scripts/register_user_example.js
-```
-
-### GUI Features
-
-```bash
-# Access pages:
-http://localhost:3000/          # Home (bank selection)
-http://localhost:3000/bank/[code]/dashboard  # Dashboard (tất cả tính năng)
-http://localhost:3000/bank/[code]/withdraw   # Withdraw page (rút tiền)
-
-# Dashboard features:
-# - Modern Balance Card (emerald gradient)
-# - PKI & Security Info Card (tích hợp)
-# - Transaction Analytics Chart (🔴 đỏ = sent, 🟢 xanh = received)
-# - Stats Cards (Completed, Sent, Received, Pending)
-# - Recent Transactions list với color coding
-# - Transfer functionality (tích hợp trong Dashboard)
-
-# Withdraw page features: ⭐ MỚI
-# - User Selector (dropdown để chọn user dễ dàng)
-# - Withdraw từ contract balance (nếu contract deployed)
-# - Fallback to native transfer (nếu contract chưa deploy)
-# - OTP verification (mock)
-# - Real-time balance update sau khi rút tiền
-```
-
-### Common Errors
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Empty reply from server` | Using HTTP when TLS enabled | Use `https://` instead of `http://` |
-| `self-signed certificate` | Node.js strict validation | Set `NODE_TLS_REJECT_UNAUTHORIZED=0` |
-| `Connection refused` | Node not running | `docker-compose up -d` |
-| `User not registered in PKI Registry` ⭐ | User chưa register trong PKI | Run `node scripts/deploy_pki.js` |
-| `KYC not valid` ⭐ | KYC chưa verify hoặc đã hết hạn | Bank verify KYC: `verifyKYC(user, hash, days)` |
-| `Transfer not authorized` ⭐ | Vượt daily limit hoặc no permission | Bank set auth: `setAuthorization(user, ...)` |
-
-### Security Notes
-
-⚠️ **Development workaround:**
-```bash
-NODE_TLS_REJECT_UNAUTHORIZED=0  # Disable cert verification
-curl -k                          # Skip cert verification
-```
-
-**Production:** Use proper CA-signed certificates or import self-signed CA to system trust store.
-
-**See full cheat sheet:** [RUNBOOK_TLS_CHEAT_SHEET.md](./RUNBOOK_TLS_CHEAT_SHEET.md)
-
----
-
 ## 🎯 System Architecture Summary
 
 **Hệ thống đầy đủ theo báo cáo NT219_BaoCaoTienDo-2.pdf:**
@@ -1985,21 +1614,22 @@ curl -k                          # Skip cert verification
 │  • TLS 1.3 (RSA 4096 + AES-GCM-256)        │
 │  • PQC Signatures (Dilithium3)             │
 │  • PKI Registry (KYC + Auth) ⭐            │
+│  • ZKP Balance Proof ⚠️ BẮT BUỘC          │
 └────────────────────────────────────────────┘
                     ↓
 ┌────────────────────────────────────────────┐
 │         BLOCKCHAIN LAYER                    │
 │  • 8 Besu Nodes (QBFT Consensus)           │
 │  • Smart Contracts:                         │
-│    - InterbankTransfer (with PKI) ⭐       │
+│    - InterbankTransfer (with PKI + ZKP) ⭐ │
 │    - PKIRegistry ⭐                         │
-│    - STARKVerifier (Track B - future)      │
+│    - BalanceVerifier ⚠️ BẮT BUỘC           │
 └────────────────────────────────────────────┘
                     ↓
 ┌────────────────────────────────────────────┐
 │         SERVICE LAYER                       │
 │  • KSM (Port 8080) - PQC signing           │
-│  • ZKP Prover (Port 8081) - STARK proofs   │
+│  • ZKP Prover (Port 8081) - Balance Proof ⚠️ BẮT BUỘC │
 └────────────────────────────────────────────┘
                     ↓
 ┌────────────────────────────────────────────┐
@@ -2013,13 +1643,13 @@ curl -k                          # Skip cert verification
 **Deployed Contracts:**
 - ✅ `InterbankTransfer` - Main transfer logic + PKI integration ⭐
 - ✅ `PKIRegistry` - User identity, KYC, authorization ⭐
-- ⏳ `STARKVerifier` - ZK proof verification (Track B)
+- ✅ `BalanceVerifier` - ZK proof verification (Balance > Amount) ⚠️ **BẮT BUỘC**
 
 **Services Running:**
 - ✅ 8x Besu Nodes (blockchain)
 - ✅ KSM Service (PQC signing - Dilithium3)
+- ✅ ZKP Prover (Balance Proof - Port 8081) ⚠️ **BẮT BUỘC**
 - ✅ Monitoring tools (Blockscout, Grafana)
-- ⏳ ZKP Prover (Winterfell STARK - Track B)
 
 **GUI Features:**
 - ✅ Home page (bank selection)
@@ -2038,53 +1668,7 @@ curl -k                          # Skip cert verification
 - ✅ KSM persistent storage (AES-256-CBC)
 - ✅ PKI Registry (KYC + daily limits) ⭐
 - ✅ Key rotation support
-- ⏳ ZK-STARK proofs (Track B)
-
----
-
-## 🎯 Checklist hoàn thành
-
-**Infrastructure:**
-- [ ] TLS 1.3 certificates generated
-- [ ] Node configs với TLS created
-- [ ] Blockchain network running (8 nodes)
-- [ ] All nodes healthy and peering
-
-**PQC/KSM:**
-- [ ] KSM service built & running
-- [ ] PQC keys generated cho banks
-- [ ] Keys persisted in ksm-data/
-- [ ] KSM API tested
-
-**Smart Contracts:**
-- [ ] InterbankTransfer deployed
-- [ ] PKI Registry deployed ⭐
-- [ ] PKI linked to InterbankTransfer ⭐
-- [ ] Test users registered with KYC ⭐
-- [ ] All bank addresses authorized
-
-**GUI:**
-- [ ] GUI running on localhost:3000
-- [ ] Home page loads (bank selection)
-- [ ] Dashboard displays correctly ⭐
-  - [ ] Balance Card shows correct balance
-  - [ ] PKI & Security Info Card visible
-  - [ ] Transaction Chart displays (đỏ/xanh)
-  - [ ] Stats Cards show correct counts
-  - [ ] Recent Transactions list works
-  - [ ] Transfer functionality working in Dashboard
-- [ ] PKI info displaying correctly in Dashboard ⭐
-- [ ] Daily limits tracking in Dashboard ⭐
-
-**Testing:**
-- [ ] Blockchain responding to RPC
-- [ ] TLS 1.3 verified
-- [ ] PQC signing/verification working
-- [ ] Dashboard transfers with PKI verification ⭐
-- [ ] Daily limits enforced ⭐
-- [ ] KYC checks working ⭐
-
-**✅ Hệ thống hoàn chỉnh: TLS 1.3 + PQC + PKI Registry!**
+- ✅ ZKP Balance Proof (Privacy-preserving verification) ⚠️ **BẮT BUỘC**
 
 ---
 
@@ -2095,4 +1679,6 @@ curl -k                          # Skip cert verification
 - [ZKP Winterfell Deployment](../deployment/ZKP_WINTERFELL_DEPLOYMENT.md) ⭐
 - [Quy trình triển khai PQC](../deployment/QUY_TRINH_TRIEN_KHAI_PQC.md) ⭐
 - [TLS 1.3 Setup Guide](../deployment/TLS13_SETUP_GUIDE.md)
+
+---
 

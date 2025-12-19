@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Navigation from "@/components/Navigation";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Interbank System - Hệ thống Liên ngân hàng",
-  description: "Quản lý giao dịch liên ngân hàng trên blockchain",
+  description: "Quản lý giao dịch liên ngân hàng trên blockchain với PKI & PQC",
 };
 
 export default function RootLayout({
@@ -27,6 +28,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <Navigation />
         {children}
       </body>
     </html>

@@ -18,13 +18,35 @@ const USERS_TO_FUND = [
 async function fundUsers() {
     console.log("Funding users for PKI registration...\n");
     
-    const providerOptions = RPC_ENDPOINT.startsWith('https') ? {
-        fetchOptions: {
-            agent: new https.Agent({ rejectUnauthorized: false })
+    // Setup provider with TLS support (same as other scripts)
+    let fetchRequest = undefined;
+    if (RPC_ENDPOINT.startsWith('https://')) {
+        const CA_CERT_PATH = process.env.CA_CERT_PATH || path.resolve(__dirname, '../../../config/tls/ca/certs/sbv-root-ca.crt');
+        const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === 'true' || process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0';
+        
+        const httpsAgent = new https.Agent({
+            rejectUnauthorized: !ALLOW_INSECURE_TLS,
+            ca: fs.existsSync(CA_CERT_PATH) ? fs.readFileSync(CA_CERT_PATH) : undefined
+        });
+        
+        if (fs.existsSync(CA_CERT_PATH)) {
+            console.log(`🔒 Using TLS with CA certificate: ${CA_CERT_PATH}`);
+        } else if (ALLOW_INSECURE_TLS) {
+            console.log(`⚠️  TLS enabled but CA cert not found. Using insecure mode (not recommended)`);
         }
-    } : {};
+        
+        fetchRequest = (url, options) => {
+            return fetch(url, {
+                ...options,
+                agent: httpsAgent
+            });
+        };
+    }
     
-    const provider = new ethers.JsonRpcProvider(RPC_ENDPOINT, undefined, providerOptions);
+    const provider = new ethers.JsonRpcProvider(RPC_ENDPOINT, undefined, { 
+        fetchRequest,
+        ensAddress: null  // Disable ENS resolution for private networks
+    });
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
     
     console.log(`Funding from: ${wallet.address}`);

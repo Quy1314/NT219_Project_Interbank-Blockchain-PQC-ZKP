@@ -14,8 +14,17 @@ x-besu-def:
 
       cp "/config/${BESU_CONS_ALGO:-QBFT}genesis.json" /config/genesis.json
 
+      # Use TLS config if available, otherwise use standard config
+      if [ -f "/opt/besu/keys/config-tls.toml" ]; then
+        CONFIG_FILE="/opt/besu/keys/config-tls.toml"
+        echo "Using TLS configuration"
+      else
+        CONFIG_FILE="/config/config.toml"
+        echo "Using standard configuration (no TLS)"
+      fi
+
       /opt/besu/bin/besu \
-      --config-file=/config/config.toml \
+      --config-file=$$CONFIG_FILE \
       --p2p-host=$$(hostname -i) \
       --rpc-http-api=EEA,WEB3,ETH,NET,TRACE,DEBUG,ADMIN,TXPOOL,PRIV,PERM,${BESU_CONS_ALGO:-QBFT} \
       --rpc-ws-api=EEA,WEB3,ETH,NET,TRACE,DEBUG,ADMIN,TXPOOL,PRIV,PERM,${BESU_CONS_ALGO:-QBFT} ;
@@ -195,6 +204,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/sbv:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     networks:
       quorum-dev-quickstart:
@@ -213,6 +223,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/vietcombank:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     depends_on:
       - sbv
@@ -233,6 +244,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/vietinbank:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     depends_on:
       - sbv
@@ -253,6 +265,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/bidv:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     depends_on:
       - sbv
@@ -268,6 +281,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/rpcnode:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     depends_on:
       - sbv
@@ -277,6 +291,29 @@ services:
     networks:
       quorum-dev-quickstart:
         ipv4_address: 172.16.239.15
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        cp "/config/${BESU_CONS_ALGO:-QBFT}genesis.json" /config/genesis.json
+        
+        # Priority: config.toml > config-tls.toml > /config/config.toml
+        if [ -f "/opt/besu/keys/config.toml" ]; then
+          CONFIG_FILE="/opt/besu/keys/config.toml"
+          echo "Using local configuration (no TLS)"
+        elif [ -f "/opt/besu/keys/config-tls.toml" ]; then
+          CONFIG_FILE="/opt/besu/keys/config-tls.toml"
+          echo "Using TLS configuration"
+        else
+          CONFIG_FILE="/config/config.toml"
+          echo "Using standard configuration"
+        fi
+        
+        /opt/besu/bin/besu \
+        --config-file=$$CONFIG_FILE \
+        --p2p-host=$$(hostname -i) \
+        --rpc-http-api=EEA,WEB3,ETH,NET,TRACE,DEBUG,ADMIN,TXPOOL,PRIV,PERM,${BESU_CONS_ALGO:-QBFT} \
+        --rpc-ws-api=EEA,WEB3,ETH,NET,TRACE,DEBUG,ADMIN,TXPOOL,PRIV,PERM,${BESU_CONS_ALGO:-QBFT} ;
 
   ethsignerProxy:
     << : *ethsignerProxy-def
@@ -291,6 +328,29 @@ services:
     networks:
       quorum-dev-quickstart:
         ipv4_address: 172.16.239.40
+
+  ksm:
+    build:
+      context: ../ksm
+      dockerfile: Dockerfile
+    container_name: ksm-service
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./ksm-data:/app/ksm-data  # ✅ Persistent storage for encrypted private keys
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - KSM_STORAGE_DIR=/app/ksm-data  # Storage directory path
+    networks:
+      quorum-dev-quickstart:
+        ipv4_address: 172.16.239.60
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--proxy", "off", "http://localhost:8080/ksm/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 
   member1tessera:
@@ -313,8 +373,18 @@ services:
       - /bin/bash
       - -c
       - |
+        cp "/config/${BESU_CONS_ALGO:-QBFT}genesis.json" /config/genesis.json
+        
+        if [ -f "/opt/besu/keys/config-tls.toml" ]; then
+          CONFIG_FILE="/opt/besu/keys/config-tls.toml"
+          echo "Using TLS configuration"
+        else
+          CONFIG_FILE="/config/config.toml"
+          echo "Using standard configuration (no TLS)"
+        fi
+        
         /opt/besu/bin/besu \
-        --config-file=/config/config.toml \
+        --config-file=$$CONFIG_FILE \
         --p2p-host=$$(hostname -i) \
         --privacy-enabled \
         --privacy-url=http://member1tessera:9101 \
@@ -325,6 +395,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/member1:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     depends_on:
       - sbv
@@ -356,8 +427,18 @@ services:
       - /bin/bash
       - -c
       - |
+        cp "/config/${BESU_CONS_ALGO:-QBFT}genesis.json" /config/genesis.json
+        
+        if [ -f "/opt/besu/keys/config-tls.toml" ]; then
+          CONFIG_FILE="/opt/besu/keys/config-tls.toml"
+          echo "Using TLS configuration"
+        else
+          CONFIG_FILE="/config/config.toml"
+          echo "Using standard configuration (no TLS)"
+        fi
+        
         /opt/besu/bin/besu \
-        --config-file=/config/config.toml \
+        --config-file=$$CONFIG_FILE \
         --p2p-host=$$(hostname -i) \
         --privacy-enabled \
         --privacy-url=http://member2tessera:9101 \
@@ -368,6 +449,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/member2:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     depends_on:
       - sbv
@@ -399,8 +481,18 @@ services:
       - /bin/bash
       - -c
       - |
+        cp "/config/${BESU_CONS_ALGO:-QBFT}genesis.json" /config/genesis.json
+        
+        if [ -f "/opt/besu/keys/config-tls.toml" ]; then
+          CONFIG_FILE="/opt/besu/keys/config-tls.toml"
+          echo "Using TLS configuration"
+        else
+          CONFIG_FILE="/config/config.toml"
+          echo "Using standard configuration (no TLS)"
+        fi
+        
         /opt/besu/bin/besu \
-        --config-file=/config/config.toml \
+        --config-file=$$CONFIG_FILE \
         --p2p-host=$$(hostname -i) \
         --privacy-enabled \
         --privacy-url=http://member3tessera:9101 \
@@ -411,6 +503,7 @@ services:
     volumes:
       - ./config/besu/:/config
       - ./config/nodes/member3:/opt/besu/keys
+      - ./config/tls:/config/tls:ro
       - ./logs/besu:/tmp/besu
     depends_on:
       - sbv

@@ -1,0 +1,28 @@
+version: '3'
+services:
+  interbank-benchmark:
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./server
+    volumes:
+      - /app/node_modules
+      - ./server:/app
+    environment:
+      - TEST_TYPE=1 # Smart contract test
+      - SMART_CONTRACT_OPTION=5 # InterbankTransfer test
+      - DESIRED_RATE_TX=20
+      - TEST_TIME_MINUTES=2
+      - RPC_URL=https://localhost:21001 # Besu RPC endpoint
+      - MAX_GAS_PER_TX=300000 # Gas limit for transfer
+      - NUMBER_OF_CONTAINERS=1
+      - STORE_DATA=TRUE
+      - NODE_TLS_REJECT_UNAUTHORIZED=0 # For self-signed certificates
+      # Required for smart contract test (not used but must be set)
+      - AMOUNT_DATA_BYTES=0
+      # InterbankTransfer specific settings
+      - INTERBANK_CONTRACT_ADDRESS=0x42699A7612A82f1d9C36148af9C77354759b210b
+      - TO_ADDRESS=0x0000000000000000000000000000000000000001
+      - AMOUNT_WEI=1000000000000000 # 0.001 ETH
+      - TO_BANK_CODE=VCB
+    network_mode: host # Using localhost instead of isolated network
+

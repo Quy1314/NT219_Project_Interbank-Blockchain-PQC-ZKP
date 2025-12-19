@@ -155,5 +155,48 @@ export const formatAddress = (address: string): string => {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 };
 
+/**
+ * Get a contract instance with custom address and ABI
+ * @param contractAddress - The contract address
+ * @param abi - The contract ABI
+ * @returns Contract instance or null if provider unavailable
+ */
+export const getContract = async (
+  contractAddress: string,
+  abi: any[]
+): Promise<ethers.Contract | null> => {
+  try {
+    const provider = getProvider();
+    if (!provider) {
+      console.error('Provider not available');
+      return null;
+    }
+    
+    // Create contract instance without signer (read-only)
+    const contract = new ethers.Contract(contractAddress, abi, provider);
+    return contract;
+  } catch (error: any) {
+    console.error('Error creating contract instance:', error);
+    return null;
+  }
+};
+
+/**
+ * Get current account from browser wallet (MetaMask, etc.)
+ * @returns Account address or empty string
+ */
+export const getCurrentAccount = async (): Promise<string> => {
+  try {
+    if (typeof window !== 'undefined' && window.ethereum) {
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+      return accounts[0] || '';
+    }
+    return '';
+  } catch (error) {
+    console.error('Error getting current account:', error);
+    return '';
+  }
+};
+
 // Removed - moved to storage.ts
 

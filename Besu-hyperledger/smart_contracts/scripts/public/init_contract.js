@@ -1,11 +1,30 @@
 const path = require('path');
 const fs = require('fs-extra');
 const ethers = require('ethers');
+const https = require('https');
 
 // Contract address (đã deploy)
 // Có thể set qua environment variable: CONTRACT_ADDRESS
 // Hoặc sẽ được tự động set khi chạy deploy_and_init.js
-const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || '0x42699A7612A82f1d9C36148af9C77354759b210b';
+// Hoặc đọc từ file InterbankTransfer.address.txt
+function getContractAddress() {
+    if (process.env.CONTRACT_ADDRESS) {
+        return process.env.CONTRACT_ADDRESS;
+    }
+    
+    // Try to read from file
+    const addressPath = path.resolve(__dirname, '../../', 'contracts', 'InterbankTransfer.address.txt');
+    if (fs.existsSync(addressPath)) {
+        const address = fs.readFileSync(addressPath, 'utf8').trim();
+        // Validate address is not a placeholder
+        if (address && address !== '0x...' && address.length === 42) {
+            return address;
+        }
+    }
+    
+    // Fallback to old address (for backward compatibility)
+    return '0x42699A7612A82f1d9C36148af9C77354759b210b';
+}
 
 // RPC endpoint
 const host = process.env.RPC_ENDPOINT || "http://127.0.0.1:21001";
@@ -38,11 +57,53 @@ const contractAbi = contractJson.abi;
 async function initializeContract() {
     try {
         console.log("Connecting to blockchain at:", host);
-        const provider = new ethers.JsonRpcProvider(host);
+        
+        // Setup provider with TLS support for HTTPS (same as deploy script)
+        let fetchRequest = undefined;
+        if (host.startsWith('https://')) {
+            const CA_CERT_PATH = process.env.CA_CERT_PATH || path.resolve(__dirname, '../../../config/tls/ca/certs/sbv-root-ca.crt');
+            const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === 'true' || process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0';
+            
+            const httpsAgent = new https.Agent({
+                rejectUnauthorized: !ALLOW_INSECURE_TLS,
+                ca: fs.existsSync(CA_CERT_PATH) ? fs.readFileSync(CA_CERT_PATH) : undefined
+            });
+            
+            if (fs.existsSync(CA_CERT_PATH)) {
+                console.log(`🔒 Using TLS with CA certificate: ${CA_CERT_PATH}`);
+            } else if (ALLOW_INSECURE_TLS) {
+                console.log(`⚠️  TLS enabled but CA cert not found. Using insecure mode (not recommended)`);
+            }
+            
+            fetchRequest = (url, options) => {
+                return fetch(url, {
+                    ...options,
+                    agent: httpsAgent
+                });
+            };
+        }
+        
+        // Create provider with ENS disabled for private networks
+        const provider = new ethers.JsonRpcProvider(host, undefined, { 
+            fetchRequest,
+            ensAddress: null  // Disable ENS resolution for private networks
+        });
         
         // Kiểm tra kết nối
         const network = await provider.getNetwork();
         console.log(`✅ Connected to network: Chain ID ${network.chainId}`);
+        
+        // Get contract address at runtime (to pick up env var set by deploy_and_init.js)
+        const rawAddress = getContractAddress();
+        
+        // Validate address before normalizing
+        if (!rawAddress || rawAddress === '0x...' || rawAddress.length !== 42) {
+            throw new Error(`Invalid contract address: "${rawAddress}". Please ensure CONTRACT_ADDRESS is set or InterbankTransfer.address.txt contains a valid address.`);
+        }
+        
+        // Normalize contract address to ensure proper format (prevents ENS resolution)
+        const contractAddress = ethers.getAddress(rawAddress);
+        console.log(`📋 Using Contract Address: ${contractAddress}`);
         
         const ownerWallet = new ethers.Wallet(ownerPrivateKey, provider);
         console.log("Owner address:", ownerWallet.address);
@@ -56,8 +117,8 @@ async function initializeContract() {
             console.warn(`   Cần: ${ethers.formatEther(INITIAL_ETH_AMOUNT * BigInt(USERS.length))} ETH`);
         }
         
-        // Get contract instance
-        const contract = new ethers.Contract(CONTRACT_ADDRESS, contractAbi, ownerWallet);
+        // Get contract instance (use normalized address to prevent ENS resolution)
+        const contract = new ethers.Contract(contractAddress, contractAbi, ownerWallet);
         
         // Verify contract is accessible
         const contractOwner = await contract.owner();
@@ -65,6 +126,21 @@ async function initializeContract() {
         
         if (contractOwner.toLowerCase() !== ownerWallet.address.toLowerCase()) {
             throw new Error(`Owner mismatch! Contract owner: ${contractOwner}, Wallet: ${ownerWallet.address}`);
+        }
+        
+        // Check if PKI is enabled
+        let pkiEnabled = false;
+        try {
+            pkiEnabled = await contract.pkiEnabled();
+            console.log(`PKI Enabled: ${pkiEnabled}`);
+            if (pkiEnabled) {
+                console.log("⚠️  PKI is enabled. Users need to be registered in PKI first.");
+                console.log("   If this is a fresh deploy, PKI should be disabled.");
+                console.log("   You can disable PKI temporarily with: togglePKI(false)");
+            }
+        } catch (error) {
+            // Contract might not have pkiEnabled() function (old version)
+            console.log("ℹ️  PKI status check skipped (contract may not have PKI integration)");
         }
         
         console.log("\n📋 Bước 1: Authorize bank addresses...");

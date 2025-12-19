@@ -1,0 +1,44 @@
+# Logs
+*.log
+logs/
+Besu-hyperledger/logs/
+ethereum-benchmark/server/logs/
+
+# Node modules
+node_modules/
+Besu-hyperledger/smart_contracts/node_modules/
+
+# Build artifacts
+target/
+PQC/target/
+ksm/target/
+prover/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Certificates and keys (sensitive)
+*.key
+*.crt
+*.csr
+*.p12
+*.pem
+Besu-hyperledger/config/tls/
+Besu-hyperledger/ksm-data/
+
+# Environment files
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.backup

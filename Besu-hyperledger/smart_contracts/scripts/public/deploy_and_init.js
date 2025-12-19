@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs-extra');
 const ethers = require('ethers');
+const { createProvider, createWallet, getTLSInfo } = require('../tls-provider');
 
 // Import deploy và init functions
 const { deployContract } = require('./deploy_interbank');
