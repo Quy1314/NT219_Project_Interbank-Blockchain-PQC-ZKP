@@ -2,16 +2,6 @@
 
 Runbook này hướng dẫn chi tiết cách khởi động hệ thống từ đầu: từ blockchain, deploy contract, đến chạy web dev.
 
-## 🎯 Quick Decision Guide
-
-**🔐 Full Security (TLS 1.3 + PQC + PKI + ZKP) - Khuyên dùng**
-
-Follow [Quick Start Full Security](#-quick-start-với-tls-13--pqc-full-security---khuyên-dùng) để có đầy đủ bảo mật theo yêu cầu NT219_BaoCaoTienDo-2.pdf.
-
-**⚠️ QUAN TRỌNG:** ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security cho hệ thống!
-
-**💡 Important:** Khi TLS enabled, node **CHỈ** accept **HTTPS** (`https://localhost:21001`), không accept HTTP!
-
 ## 📋 Mục lục
 
 1. [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
@@ -19,15 +9,14 @@ Follow [Quick Start Full Security](#-quick-start-với-tls-13--pqc-full-security
 3. [Bước 0B: Thiết lập PQC/KSM (Post-Quantum Crypto)](#bước-0b-thiết-lập-pqcksm-post-quantum-crypto)
 4. [Bước 1: Khởi động Blockchain](#bước-1-khởi-động-blockchain)
 5. [Bước 2: Kiểm tra Blockchain](#bước-2-kiểm-tra-blockchain)
-6. [Bước 3: Deploy Smart Contracts](#bước-3-deploy-smart-contracts) **⭐ CẬP NHẬT**
+6. [Bước 3: Deploy Smart Contracts](#bước-3-deploy-smart-contracts) 
    - [3.1-3.4: Deploy InterbankTransfer](#bước-3-deploy-smart-contracts)
-   - [3.5: Deploy PKI Registry](#bước-35-deploy-pki-registry-user-management) **⭐ MỚI**
-   - [3.6: Link PKI to InterbankTransfer](#bước-36-link-pki-to-interbanktransfer) **⭐ MỚI**
-   - [3.8: Bật ZKP Balance Proof](#38--bắt-buộc-bật-zkp-balance-proof) **⚠️ BẮT BUỘC**
+   - [3.5: Deploy PKI Registry](#bước-35-deploy-pki-registry-user-management) 
+   - [3.6: Link PKI to InterbankTransfer](#bước-36-link-pki-to-interbanktransfer) 
+   - [3.8: Bật ZKP Balance Proof](#38--bắt-buộc-bật-zkp-balance-proof) 
    - [3.9: PQC Signature Storage On-Chain](#39-pqc-signature-storage-on-chain-khuyến-nghị)
 7. [Bước 4: Khởi động Web GUI](#bước-4-khởi-động-web-gui)
-8. [Bước 5: Benchmark với Lacchain Ethereum-Benchmark](#bước-5-benchmark-với-lacchain-ethereum-benchmark) **⭐ MỚI**
-
+8. [Bước 5: Benchmark với Lacchain Ethereum-Benchmark](#bước-5-benchmark-với-lacchain-ethereum-benchmark) *
 ---
 
 ## Yêu cầu hệ thống
@@ -48,8 +37,6 @@ npm --version             # npm 8.0+
 ---
 
 ## Bước 0A: Thiết lập TLS 1.3 (Khuyên dùng)
-
-> **Lưu ý:** Bước này là tùy chọn nhưng **rất khuyến khích** để bảo mật đường truyền theo yêu cầu NT219_BaoCaoTienDo-2.pdf.
 
 ### 0.1. Tạo TLS Certificates
 
@@ -109,9 +96,6 @@ Docker-compose đã được cấu hình tự động:
 ---
 
 ## Bước 0B: Thiết lập PQC/KSM (Post-Quantum Crypto)
-
-> **Lưu ý:** Bước này là **tùy chọn** nhưng rất khuyến khích để đạt quantum resistance theo yêu cầu NT219_BaoCaoTienDo-2.pdf (Track A - Section 5.1).
-
 ### Giới thiệu PQC/KSM
 
 **KSM (Key Simulation Module)** là service Java cung cấp:
