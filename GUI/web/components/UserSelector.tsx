@@ -21,7 +21,7 @@ export default function UserSelector({ bank, selectedUser, onSelectUser }: UserS
       >
         <User className="h-5 w-5 text-gray-600" />
         <span className="font-medium text-gray-700">
-          {selectedUser ? selectedUser.name : 'Chọn người dùng'}
+          {selectedUser ? (selectedUser.fullName || selectedUser.name) : 'Chọn người dùng'}
         </span>
         <ChevronDown className="h-4 w-4 text-gray-600" />
       </button>
@@ -47,10 +47,15 @@ export default function UserSelector({ bank, selectedUser, onSelectUser }: UserS
                       : 'hover:bg-gray-50 text-gray-700'
                   }`}
                 >
-                  <div className="font-medium">{user.name}</div>
+                  <div className="font-medium">{user.fullName || user.name}</div>
                   <div className="text-sm text-gray-500 mt-1">
                     {user.address.slice(0, 10)}...{user.address.slice(-8)}
                   </div>
+                  {user.phone && (
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {user.phone}
+                    </div>
+                  )}
                 </button>
               ))}
             </div>

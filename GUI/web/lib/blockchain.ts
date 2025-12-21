@@ -43,6 +43,9 @@ export const getBalanceVND = async (address: string): Promise<number | null> => 
   }
 };
 
+// Track pending transactions to prevent duplicate sends
+const pendingTransactions = new Map<string, Promise<ethers.TransactionResponse>>();
+
 export const sendTransaction = async (
   fromPrivateKey: string,
   toAddress: string,
@@ -53,12 +56,28 @@ export const sendTransaction = async (
   const provider = getProvider();
   const amountWei = vndToWei(amountVND);
 
+  // Create a unique key for this transaction to prevent duplicates
+  const txKey = `${wallet.address}-${toAddress}-${amountWei.toString()}-${Date.now()}`;
+  
+  // Check if there's already a pending transaction for this address
+  // (simple check - in production, use a more sophisticated approach)
+  const pendingKey = `${wallet.address}-${toAddress}`;
+  if (pendingTransactions.has(pendingKey)) {
+    console.warn('⚠️ Transaction already pending for this address, waiting for completion...');
+    try {
+      return await pendingTransactions.get(pendingKey)!;
+    } catch (error) {
+      // If pending transaction failed, allow retry
+      pendingTransactions.delete(pendingKey);
+    }
+  }
+
   // Check balance first
   const balance = await provider.getBalance(wallet.address);
   
   // For test network with min-gas-price=0, gas is free
   const gasPrice = BigInt(0);
-  const gasLimit = BigInt(15000000); // Max gas limit (block limit is 16,243,360)
+  const gasLimit = BigInt(16000000); // Max gas limit (block limit is 16,243,360)
   const gasCost = gasLimit * gasPrice; // Will be 0
   
   // Check if balance is sufficient (amount + gas)
@@ -108,15 +127,47 @@ export const sendTransaction = async (
     );
   }
 
-  // Send transaction with explicit gas price (0 for test network)
-  const tx = await wallet.sendTransaction({
-    to: toAddress,
-    value: amountWei,
-    gasLimit: Number(gasLimit),
-    gasPrice: 0, // Free gas for test network
-  });
-
-  return tx;
+  // Create promise for this transaction
+  const txPromise = (async () => {
+    try {
+      // Send transaction with explicit gas price (0 for test network)
+      const tx = await wallet.sendTransaction({
+        to: toAddress,
+        value: amountWei,
+        gasLimit: Number(gasLimit),
+        gasPrice: 0, // Free gas for test network
+      });
+      
+      // Remove from pending after a short delay (to allow for potential retries)
+      setTimeout(() => {
+        pendingTransactions.delete(pendingKey);
+      }, 5000);
+      
+      return tx;
+    } catch (error: any) {
+      // Remove from pending on error
+      pendingTransactions.delete(pendingKey);
+      
+      // Handle "Known transaction" error gracefully
+      if (error.message && (
+        error.message.includes('Known transaction') ||
+        error.message.includes('already known') ||
+        error.code === -32000
+      )) {
+        console.warn('⚠️ Transaction already known to network, this is usually safe to ignore');
+        // Try to get the transaction hash from error if available
+        // For now, rethrow but with a clearer message
+        throw new Error('Transaction đã được gửi trước đó. Vui lòng đợi transaction được xác nhận.');
+      }
+      
+      throw error;
+    }
+  })();
+  
+  // Store pending transaction
+  pendingTransactions.set(pendingKey, txPromise);
+  
+  return txPromise;
 };
 
 export const waitForTransaction = async (

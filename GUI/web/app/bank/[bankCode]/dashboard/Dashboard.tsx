@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { Wallet, TrendingUp, Send, Clock, AlertCircle, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { animate } from 'animejs';
 import { getBankByCode, BankUser } from '@/config/banks';
 import { getBalanceVND, formatAddress } from '@/lib/blockchain';
 import { formatVND } from '@/config/blockchain';
@@ -10,6 +11,7 @@ import { getTransactionsByUser, getStoredBalance } from '@/lib/storage';
 import { loadBalances, getBalanceForUser } from '@/lib/balances';
 import { isContractDeployed, getContractBalance, listenToTransferEvents } from '@/lib/contract';
 import UserProfileCard from '@/components/UserProfileCard';
+import UserIdentityCard from '@/components/UserIdentityCard';
 import TransactionChart from '@/components/TransactionChart';
 
 export default function Dashboard() {
@@ -21,21 +23,53 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [useContract, setUseContract] = useState<boolean | null>(null);
+  
+  // Animation refs
+  const balanceRef = useRef<HTMLDivElement>(null);
+  const cardsRef = useRef<HTMLDivElement>(null);
+  const prevBalanceRef = useRef<number | null>(null);
 
   useEffect(() => {
     const bank = getBankByCode(bankCode);
     if (!bank) return;
 
-    const savedUserId = localStorage.getItem('interbank_selected_user');
-    const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
-    setUser(selectedUser);
+    const loadUser = () => {
+      const savedUserId = localStorage.getItem('interbank_selected_user');
+      const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
+      setUser(selectedUser);
+    };
 
+    loadUser();
     checkContractStatus();
 
-    if (selectedUser) {
-      loadBalanceFromFile(selectedUser.address);
-      loadBalance(selectedUser.address);
-    }
+    // Listen for storage changes (when user changes in layout)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'interbank_selected_user') {
+        loadUser();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also listen for custom event (for same-window changes)
+    const handleUserChange = () => {
+      loadUser();
+    };
+    window.addEventListener('userChanged', handleUserChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userChanged', handleUserChange);
+    };
+  }, [bankCode]);
+
+  // Reload balance and setup event listener when user changes
+  useEffect(() => {
+    if (!user) return;
+
+    // Reload balance when user changes
+    loadBalanceFromFile(user.address);
+    loadBalance(user.address);
 
     let cleanupListener: (() => void) | undefined;
     
@@ -61,20 +95,18 @@ export default function Dashboard() {
       }
     };
 
-    if (selectedUser) {
-      setupEventListener(selectedUser.address).then((cleanup) => {
-        if (cleanup) {
-          cleanupListener = cleanup;
-        }
-      });
-    }
+    setupEventListener(user.address).then((cleanup) => {
+      if (cleanup) {
+        cleanupListener = cleanup;
+      }
+    });
 
     return () => {
       if (cleanupListener) {
         cleanupListener();
       }
     };
-  }, [bankCode]);
+  }, [user?.address, bankCode]);
 
   const checkContractStatus = async () => {
     try {
@@ -173,7 +205,6 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
-          <p className="text-gray-500 mt-1">Plan, prioritize, and accomplish your tasks with ease.</p>
         </div>
       </div>
 
@@ -194,14 +225,15 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-emerald-100 text-sm">Số dư tài khoản</p>
-                    <p className="text-white/80 text-xs font-mono">{formatAddress(user.address)}</p>
+                    <p className="text-white/90 text-sm font-semibold">{user.fullName || user.name}</p>
+                    <p className="text-white/60 text-xs font-mono mt-0.5">{formatAddress(user.address)}</p>
                   </div>
                 </div>
                 <ArrowUpRight className="h-6 w-6 text-emerald-200" />
               </div>
               
               <div className="mb-4">
-                <h3 className="text-5xl font-bold tracking-tight">
+                <h3 ref={balanceRef} className="text-5xl font-bold tracking-tight">
                   {isLoading 
                     ? 'Đang tải...' 
                     : balance !== null 
@@ -244,9 +276,14 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* User Identity Card */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <UserIdentityCard user={user} />
+      </div>
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow border border-gray-100">
+      <div ref={cardsRef} className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="card-animate bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow border border-gray-100">
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
               <TrendingUp className="h-6 w-6 text-emerald-600" />

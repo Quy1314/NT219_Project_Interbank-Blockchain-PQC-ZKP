@@ -3,8 +3,13 @@ const readline = require('readline');
 const {sendTransaction} = require('../pantheon_utils/web3Operations')
 const {append} = require('./logs')
 const {STORE_DATA} =require('../keys')
+const { web3 } = require('../pantheon_utils/web3')
 let count = 0
 let failed = 0
+
+// Nonce cache for better performance
+const nonceCache = new Map();
+const NONCE_RESET_THRESHOLD = 10; // Reset if nonce is more than 10 ahead
 
 helper.reproduce = (times,data) => {
     let customData = ""    
@@ -63,11 +68,16 @@ helper.generateKeys = i => {
     const fundedAccounts = loadFundedAccounts();
     
     if (fundedAccounts && fundedAccounts.length >= i) {
-        // Use pre-funded accounts
+        // Use pre-funded accounts - distribute evenly to avoid nonce congestion
         console.log(`✅ Using ${i} pre-funded accounts (total available: ${fundedAccounts.length})`);
-        // Shuffle and take i accounts
-        const shuffled = [...fundedAccounts].sort(() => Math.random() - 0.5);
-        return shuffled.slice(0, i);
+        // Use round-robin distribution instead of random shuffle for better nonce distribution
+        const selectedAccounts = [];
+        const step = Math.floor(fundedAccounts.length / i);
+        for (let k = 0; k < i; k++) {
+            const idx = (k * step) % fundedAccounts.length;
+            selectedAccounts.push(fundedAccounts[idx]);
+        }
+        return selectedAccounts;
     }
     
     // Fallback to random generation
@@ -85,6 +95,7 @@ helper.generateKeys = i => {
     
     // No funded accounts, generate random
     console.log(`⚠️  No pre-funded accounts found. Generating ${i} random accounts.`);
+    console.log(`⚠️  WARNING: Random accounts may not have funds. Run prepare-benchmark.sh first!`);
     const privateKeys = [];
     for (let k = 1; k <= i; k++) {
         let randomHexKey = helper.createRandomString(64);
@@ -168,6 +179,49 @@ helper.showResponseResults = (failed,delta,numberOfTransactions) => {
     console.log(`Effectiveness(%): ${(numberOfTransactions-failed)/numberOfTransactions*100}%`)  
     const rate = numberOfTransactions/(delta)
     console.log("Average responsiveness rate: ",rate, "tx/s")
+}
+
+// Get nonce for an address with caching and auto-reset
+helper.getNonce = async (address) => {
+    if (nonceCache.has(address)) {
+        // Use cached nonce and increment
+        const cachedNonce = nonceCache.get(address);
+        const newNonce = cachedNonce + 1;
+        nonceCache.set(address, newNonce);
+        
+        // Safety check: verify nonce is not too far ahead
+        try {
+            const blockchainNonce = await web3.eth.getTransactionCount(address, 'pending');
+            if (newNonce > blockchainNonce + NONCE_RESET_THRESHOLD) {
+                // Reset if too far ahead
+                console.warn(`⚠️  Nonce too far ahead for ${address.substring(0, 10)}... Resetting from ${newNonce} to ${blockchainNonce}`);
+                nonceCache.set(address, blockchainNonce);
+                return blockchainNonce;
+            }
+        } catch (error) {
+            // If we can't check, use cached value anyway
+            console.warn(`⚠️  Could not verify nonce for ${address.substring(0, 10)}...: ${error.message}`);
+        }
+        
+        return newNonce;
+    } else {
+        // First time: get from blockchain
+        try {
+            const txCount = await web3.eth.getTransactionCount(address, 'pending');
+            nonceCache.set(address, txCount);
+            return txCount;
+        } catch (error) {
+            console.error(`❌ Error getting nonce for ${address.substring(0, 10)}...: ${error.message}`);
+            // Fallback to 0
+            nonceCache.set(address, 0);
+            return 0;
+        }
+    }
+}
+
+// Reset nonce cache for an address (useful on errors)
+helper.resetNonce = (address) => {
+    nonceCache.delete(address);
 }
 
 module.exports = helper

@@ -15,6 +15,8 @@ const menuItems = [
   { icon: History, label: 'Lịch sử', href: '/history' },
   { icon: FileText, label: 'Sao kê', href: '/statement' },
   { icon: RefreshCw, label: 'Sync Blockchain', href: '/sync' },
+  // Audit Logs: Chỉ hiển thị khi cần (có thể bật/tắt)
+  // { icon: Shield, label: 'Audit Logs', href: '/audit' },
 ];
 
 export default function Sidebar({ bankCode }: SidebarProps) {

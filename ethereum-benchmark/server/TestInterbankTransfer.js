@@ -1,6 +1,6 @@
 const {buildTransaction} = require('./pantheon_utils/web3Operations')
 const { web3 } = require("./pantheon_utils/web3");
-const {sendTransactionAndProcessIncommingTx} = require("./lib/helpers")
+const {sendTransactionAndProcessIncommingTx, getNonce, resetNonce} = require("./lib/helpers")
 const {test} = require("./Tester")
 const valueInEther = "0"
 let contractAddress
@@ -39,18 +39,64 @@ const getContractParameters = async() => {
 }
 
 const publishInterbankTransferTransaction = async(privKey, t1, numberOfTransactions) => {
-  const params = await getContractParameters()
-  
-  // Encode transfer function call
-  const txData = contract.methods.transfer(
-    params.toAddress,
-    params.amount,
-    params.toBankCode,
-    params.description
-  ).encodeABI()
-  
-  const txObject = buildTransaction(0, params.contractAddress, valueInEther, txData)
-  sendTransactionAndProcessIncommingTx(txObject, privKey, t1, fileNameResponse, numberOfTransactions)
+  try {
+    const params = await getContractParameters()
+    
+    // Convert Buffer to hex string
+    const privKeyHex = privKey.toString('hex');
+    const privKeyWithPrefix = privKeyHex.startsWith('0x') ? privKeyHex : '0x' + privKeyHex;
+    
+    // Get sender address from private key
+    const senderAddress = web3.eth.accounts.privateKeyToAccount(privKeyWithPrefix);
+    const address = senderAddress.address;
+    
+    // Get nonce with proper management
+    const txCount = await getNonce(address);
+    
+    // Encode transfer function call
+    const txData = contract.methods.transfer(
+      params.toAddress,
+      params.amount,
+      params.toBankCode,
+      params.description
+    ).encodeABI()
+    
+    const txObject = buildTransaction(txCount, params.contractAddress, valueInEther, txData)
+    sendTransactionAndProcessIncommingTx(txObject, privKey, t1, fileNameResponse, numberOfTransactions)
+  } catch (error) {
+    // Error handling with fallback
+    console.error(`❌ Error in publishInterbankTransferTransaction: ${error.message}`);
+    const params = await getContractParameters();
+    const privKeyHex = privKey.toString('hex');
+    const privKeyWithPrefix = privKeyHex.startsWith('0x') ? privKeyHex : '0x' + privKeyHex;
+    const senderAddress = web3.eth.accounts.privateKeyToAccount(privKeyWithPrefix);
+    const address = senderAddress.address;
+    
+    // Fallback: reset nonce cache and try again
+    resetNonce(address);
+    try {
+      const txCount = await getNonce(address);
+      const txData = contract.methods.transfer(
+        params.toAddress,
+        params.amount,
+        params.toBankCode,
+        params.description
+      ).encodeABI()
+      const txObject = buildTransaction(txCount, params.contractAddress, valueInEther, txData)
+      sendTransactionAndProcessIncommingTx(txObject, privKey, t1, fileNameResponse, numberOfTransactions)
+    } catch (retryError) {
+      // Final fallback to nonce 0
+      console.error(`❌ Final fallback for ${address.substring(0, 10)}...: ${retryError.message}`);
+      const txData = contract.methods.transfer(
+        params.toAddress,
+        params.amount,
+        params.toBankCode,
+        params.description
+      ).encodeABI()
+      const txObject = buildTransaction(0, params.contractAddress, valueInEther, txData)
+      sendTransactionAndProcessIncommingTx(txObject, privKey, t1, fileNameResponse, numberOfTransactions)
+    }
+  }
 }
 
 const execInterbankTransferTest = async() => {

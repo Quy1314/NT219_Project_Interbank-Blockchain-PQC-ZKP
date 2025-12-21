@@ -29,6 +29,9 @@ const getSmartContractParameters = async() => {
   txData = set()  
 }
 
+// Nonce cache per account to optimize performance
+const nonceCache = new Map();
+
 const publishSmartContractTransaction = async(privKey,t1,numberOfTransactions) => {
   try {
     // Convert Buffer to hex string
@@ -37,16 +40,51 @@ const publishSmartContractTransaction = async(privKey,t1,numberOfTransactions) =
     
     // Get sender address from private key
     const senderAddress = web3.eth.accounts.privateKeyToAccount(privKeyWithPrefix);
+    const address = senderAddress.address;
     
-    // Get current nonce for this account (important for multi-account)
-    const txCount = await web3.eth.getTransactionCount(senderAddress.address, 'pending');
-
+    // Get nonce with caching and retry logic
+    let txCount;
+    if (nonceCache.has(address)) {
+      // Use cached nonce and increment
+      txCount = nonceCache.get(address) + 1;
+      nonceCache.set(address, txCount);
+    } else {
+      // First time: get from blockchain
+      txCount = await web3.eth.getTransactionCount(address, 'pending');
+      nonceCache.set(address, txCount);
+    }
+    
+    // Verify nonce is not too far ahead (safety check)
+    const blockchainNonce = await web3.eth.getTransactionCount(address, 'pending');
+    if (txCount > blockchainNonce + 10) {
+      // Reset if too far ahead
+      console.warn(`⚠️  Nonce too far ahead for ${address.substring(0, 10)}... Resetting from ${txCount} to ${blockchainNonce}`);
+      txCount = blockchainNonce;
+      nonceCache.set(address, txCount);
+    }
+    
     const txObject = buildTransaction(txCount,addressTo,valueInEther,txData)
     sendTransactionAndProcessIncommingTx(txObject,privKey,t1,fileNameResponse,numberOfTransactions)
   } catch (error) {
-    // Fallback to nonce 0 if error (for compatibility)
-    const txObject = buildTransaction(0,addressTo,valueInEther,txData)
-    sendTransactionAndProcessIncommingTx(txObject,privKey,t1,fileNameResponse,numberOfTransactions)
+    // On error, reset nonce cache for this account and retry
+    const privKeyHex = privKey.toString('hex');
+    const privKeyWithPrefix = privKeyHex.startsWith('0x') ? privKeyHex : '0x' + privKeyHex;
+    const senderAddress = web3.eth.accounts.privateKeyToAccount(privKeyWithPrefix);
+    const address = senderAddress.address;
+    
+    // Clear cache and get fresh nonce
+    nonceCache.delete(address);
+    try {
+      const txCount = await web3.eth.getTransactionCount(address, 'pending');
+      nonceCache.set(address, txCount);
+      const txObject = buildTransaction(txCount,addressTo,valueInEther,txData)
+      sendTransactionAndProcessIncommingTx(txObject,privKey,t1,fileNameResponse,numberOfTransactions)
+    } catch (retryError) {
+      // Final fallback to nonce 0
+      console.error(`❌ Error with nonce management for ${address.substring(0, 10)}...: ${retryError.message}`);
+      const txObject = buildTransaction(0,addressTo,valueInEther,txData)
+      sendTransactionAndProcessIncommingTx(txObject,privKey,t1,fileNameResponse,numberOfTransactions)
+    }
   }
 }
 

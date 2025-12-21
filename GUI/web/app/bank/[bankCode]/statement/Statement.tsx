@@ -32,16 +32,43 @@ export default function Statement() {
     const bank = getBankByCode(bankCode);
     if (!bank) return;
 
-    const savedUserId = localStorage.getItem('interbank_selected_user');
-    const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
-    setUser(selectedUser);
+    const loadUser = () => {
+      const savedUserId = localStorage.getItem('interbank_selected_user');
+      const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
+      setUser(selectedUser);
+    };
 
-    if (selectedUser) {
-      const userTransactions = getTransactionsByUser(bankCode, selectedUser.address);
-      setTransactions(userTransactions);
-      loadBalance(selectedUser.address);
-    }
+    loadUser();
+
+    // Listen for storage changes (when user changes in layout)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'interbank_selected_user') {
+        loadUser();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also listen for custom event (for same-window changes)
+    const handleUserChange = () => {
+      loadUser();
+    };
+    window.addEventListener('userChanged', handleUserChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userChanged', handleUserChange);
+    };
   }, [bankCode]);
+
+  // Reload transactions and balance when user changes
+  useEffect(() => {
+    if (user) {
+      const userTransactions = getTransactionsByUser(bankCode, user.address);
+      setTransactions(userTransactions);
+      loadBalance(user.address);
+    }
+  }, [user?.address, bankCode]);
 
   const loadBalance = async (address: string) => {
     // 1. Ưu tiên: Kiểm tra LocalStorage (số dư mới nhất sau giao dịch)

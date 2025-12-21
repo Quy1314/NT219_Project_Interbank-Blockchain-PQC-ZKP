@@ -7,6 +7,7 @@ import Sidebar from '@/components/layout/Sidebar';
 import UserSelector from '@/components/UserSelector';
 import { getBankByCode, BankConfig, BankUser } from '@/config/banks';
 import { getSelectedUser, setSelectedUser, getSelectedBank, setSelectedBank } from '@/lib/storage';
+import { startPeriodicAutoSync, stopPeriodicAutoSync } from '@/lib/autoSync';
 
 export default function BankLayout({
   children,
@@ -20,6 +21,16 @@ export default function BankLayout({
   
   const [bank, setBank] = useState<BankConfig | null>(null);
   const [selectedUser, setSelectedUserState] = useState<BankUser | null>(null);
+
+  useEffect(() => {
+    // Start periodic auto-sync when component mounts
+    startPeriodicAutoSync();
+    
+    // Cleanup: stop periodic sync when component unmounts
+    return () => {
+      stopPeriodicAutoSync();
+    };
+  }, []);
 
   useEffect(() => {
     // Reset state khi bankCode thay đổi
@@ -66,6 +77,8 @@ export default function BankLayout({
   const handleSelectUser = (user: BankUser) => {
     setSelectedUserState(user);
     setSelectedUser(user.id);
+    // Dispatch custom event to notify other components
+    window.dispatchEvent(new Event('userChanged'));
   };
 
   if (!bank) {

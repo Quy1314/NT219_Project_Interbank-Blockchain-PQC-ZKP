@@ -2,6 +2,15 @@
 
 Runbook này hướng dẫn chi tiết cách khởi động hệ thống từ đầu: từ blockchain, deploy contract, đến chạy web dev.
 
+## 🎯 Quick Decision Guide
+
+**🔐 Full Security (TLS 1.3 + PQC + PKI + ZKP) - Khuyên dùng**
+
+Follow [Quick Start Full Security](#-quick-start-với-tls-13--pqc-full-security---khuyên-dùng) để có đầy đủ bảo mật theo yêu cầu NT219_BaoCaoTienDo-2.pdf.
+
+ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security cho hệ thống!
+
+**💡 Important:** Khi TLS enabled, node **CHỈ** accept **HTTPS** (`https://localhost:21001`), không accept HTTP!
 ## 📋 Mục lục
 
 1. [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
@@ -9,14 +18,18 @@ Runbook này hướng dẫn chi tiết cách khởi động hệ thống từ đ
 3. [Bước 0B: Thiết lập PQC/KSM (Post-Quantum Crypto)](#bước-0b-thiết-lập-pqcksm-post-quantum-crypto)
 4. [Bước 1: Khởi động Blockchain](#bước-1-khởi-động-blockchain)
 5. [Bước 2: Kiểm tra Blockchain](#bước-2-kiểm-tra-blockchain)
-6. [Bước 3: Deploy Smart Contracts](#bước-3-deploy-smart-contracts) 
+6. [Bước 3: Deploy Smart Contracts](#bước-3-deploy-smart-contracts)
    - [3.1-3.4: Deploy InterbankTransfer](#bước-3-deploy-smart-contracts)
-   - [3.5: Deploy PKI Registry](#bước-35-deploy-pki-registry-user-management) 
-   - [3.6: Link PKI to InterbankTransfer](#bước-36-link-pki-to-interbanktransfer) 
-   - [3.8: Bật ZKP Balance Proof](#38--bắt-buộc-bật-zkp-balance-proof) 
+   - [3.5: Deploy PKI Registry](#bước-35-deploy-pki-registry-user-management)
+   - [3.6: Link PKI to InterbankTransfer](#bước-36-link-pki-to-interbanktransfer)
+   - [3.8: Bật ZKP Balance Proof](#38--bắt-buộc-bật-zkp-balance-proof)
    - [3.9: PQC Signature Storage On-Chain](#39-pqc-signature-storage-on-chain-khuyến-nghị)
 7. [Bước 4: Khởi động Web GUI](#bước-4-khởi-động-web-gui)
-8. [Bước 5: Benchmark với Lacchain Ethereum-Benchmark](#bước-5-benchmark-với-lacchain-ethereum-benchmark) *
+   - [4.8: Fix lỗi "User not registered" trong GUI](#48--fix-lỗi-user-not-registered-trong-gui)
+   - [4.9: Bảo vệ Thông tin Nhạy cảm với Password](#49--bảo-vệ-thông-tin-nhạy-cảm-với-password)
+   - [4.10: Thông tin Định danh Người dùng](#410--thông-tin-định-danh-người-dùng)
+   - [4.11: Xử lý Lỗi "Known Transaction"](#411--xử-lý-lỗi-known-transaction)
+8. [Bước 5: Benchmark với Lacchain Ethereum-Benchmark](#bước-5-benchmark-với-lacchain-ethereum-benchmark)
 ---
 
 ## Yêu cầu hệ thống
@@ -25,6 +38,68 @@ Runbook này hướng dẫn chi tiết cách khởi động hệ thống từ đ
 - **Docker** và **Docker Compose** (để chạy blockchain network)
 - **Node.js 18+** (để chạy scripts và web GUI)
 - **npm** hoặc **yarn** (package manager)
+
+### Cài đặt:
+
+#### Docker và Docker Compose
+
+**Ubuntu/Debian:**
+```bash
+# Cài đặt Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Thêm user vào docker group (để chạy docker không cần sudo)
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Cài đặt Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+```
+
+**macOS:**
+```bash
+# Cài đặt Docker Desktop (bao gồm Docker Compose)
+# Tải từ: https://www.docker.com/products/docker-desktop
+# Hoặc dùng Homebrew:
+brew install --cask docker
+```
+
+**Windows:**
+- Tải và cài đặt Docker Desktop từ: https://www.docker.com/products/docker-desktop
+- Docker Compose được bao gồm trong Docker Desktop
+
+#### Node.js và npm
+
+**Ubuntu/Debian:**
+```bash
+# Cài đặt Node.js 18+ và npm
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Hoặc dùng nvm (khuyên dùng)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+source ~/.bashrc
+nvm install 18
+nvm use 18
+```
+
+**macOS:**
+```bash
+# Dùng Homebrew
+brew install node@18
+
+# Hoặc dùng nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+source ~/.zshrc
+nvm install 18
+nvm use 18
+```
+
+**Windows:**
+- Tải và cài đặt từ: https://nodejs.org/ (chọn LTS version 18+)
+- npm được bao gồm trong Node.js installer
 
 ### Kiểm tra:
 ```bash
@@ -158,7 +233,7 @@ docker logs ksm-service --tail 20
 Started KSMApplication in X seconds
 ```
 
-**⚠️ Important: Persistent Storage**
+**Important: Persistent Storage**
 
 KSM sử dụng **persistent storage** để lưu private keys:
 - **Master Key:** `./ksm-data/master.key` (AES-256 encryption key)
@@ -288,7 +363,7 @@ curl http://localhost:8080/ksm/entities
 # → ["vietcombank", "vietinbank", "bidv", "test_persistence"]  ✅ Persisted!
 ```
 
-**⚠️ Security: Backup Master Key**
+**Security: Backup Master Key**
 ```bash
 # CRITICAL: Backup master key regularly!
 cp ./ksm-data/master.key ./backup/master-$(date +%Y%m%d).key
@@ -308,75 +383,7 @@ docker logs ksm-service --tail 20
 [KSM] Controller initialized with PQC Process Service
 ```
 
-### 0B.5. PQC trong GUI - ✅ Enabled by Default
-
-**🔒 PQC được BẬT MẶC ĐỊNH trong GUI** (từ Dec 2025)
-
-Tất cả transactions sẽ tự động sử dụng chữ ký PQC (Dilithium3) nếu KSM service available.
-
-**Không cần configuration gì cả!** PQC tự động hoạt động khi:
-1. ✅ KSM service đang chạy (`docker-compose up -d ksm`)
-2. ✅ Keys đã được generate cho banks
-3. ✅ GUI detect được KSM health endpoint
-
-**Kiểm tra PQC status trong browser console (F12):**
-
-```javascript
-// Check PQC enabled (should be true by default)
-localStorage.getItem('pqc_enabled'); // null or 'true' = enabled
-
-// Or use config
-import { getPQCEnabled } from '@/config/pqc';
-console.log('PQC Enabled:', getPQCEnabled()); // true
-```
-
-**Disable PQC (chỉ khi cần test):**
-
-```bash
-# Option 1: Environment variable (tạo .env.local)
-echo "NEXT_PUBLIC_PQC_ENABLED=false" > GUI/web/.env.local
-
-# Option 2: Browser console
-# localStorage.setItem('pqc_enabled', 'false'); location.reload();
-```
-
-**Sử dụng PQC trong transaction (tự động):**
-
-```typescript
-import { usePQC } from '@/lib/usePQC';
-
-const { signTransaction, isKSMReady } = usePQC();
-
-// PQC tự động được dùng nếu KSM ready
-if (isKSMReady) {
-  // Automatically signs with Dilithium3
-  const signature = await signTransaction(
-    'vietcombank', 
-    'vietinbank', 
-    1000000, 
-    'Transfer'
-  );
-  
-  console.log('🔐 Signed with PQC:', signature.signature);
-}
-```
-
-**Configuration file:** `GUI/web/config/pqc.ts`
-```typescript
-export const PQC_ENABLED_DEFAULT = true; // ✅ ENABLED
-export const DEFAULT_SIGNATURE_ALGORITHM = 'Dilithium3';
-export const KSM_SERVICE_URL = 'http://localhost:8080';
-```
-
-**Chi tiết:** Xem [PQC_CONFIGURATION.md](../../GUI/web/PQC_CONFIGURATION.md)
-
-### 0B.6. Performance
-
-**PQC Operations (Dilithium3):**
-
----
-
-### 0B.6. Performance
+### 0B.5. Performance
 
 **PQC Operations (Dilithium3):**
 - Key generation: ~1ms
@@ -389,27 +396,24 @@ export const KSM_SERVICE_URL = 'http://localhost:8080';
 - Latency tăng 22-72ms per transaction
 - **Acceptable** cho use case liên ngân hàng
 
-### 0B.7. Lưu ý quan trọng
+### 0B.6. Lưu ý quan trọng
 
-⚠️ **Implementation hiện tại:**
+**Implementation hiện tại:**
 - Code PQC là **simulation/mock** để minh họa flow
 - Trong production, thay bằng thư viện thực (BouncyCastle, OQS)
 - Private keys cần lưu trong HSM, không lưu trong memory
 
-✅ **Để sau này nâng cấp lên PQC thật:**
+**Để sau này nâng cấp lên PQC thật:**
 1. Thay implementation trong `DilithiumService.java` và `KyberService.java`
 2. Dùng BouncyCastle PQC library
 3. Hoặc dùng Open Quantum Safe (liboqs)
 4. Không cần thay đổi API hoặc GUI code
 
-🔒 **PQC Status:**
-- ✅ **GUI:** PQC enabled by default (Dec 2025)
-- ✅ **KSM Service:** Hoàn thiện với 6 REST endpoints
-- ✅ **Bridge Layer:** TypeScript client ready
-- ⏳ **Verifier Contract:** Sẽ được triển khai bởi ZKP module sau
-- ⏳ **Real PQC Library:** Chưa integrate (dùng mock)
-
-**Chi tiết cấu hình:** [PQC_CONFIGURATION.md](../../GUI/web/PQC_CONFIGURATION.md) | [PQC_DEFAULT_ENABLED.md](../../PQC_DEFAULT_ENABLED.md)
+**PQC Status:**
+- **KSM Service:** Hoàn thiện với 6 REST endpoints
+- **Bridge Layer:** TypeScript client ready
+- **Verifier Contract:** Sẽ được triển khai bởi ZKP module sau
+- **Real PQC Library:** Chưa integrate (dùng mock)
 
 ---
 
@@ -551,7 +555,7 @@ Bạn sẽ thấy danh sách 4 validators.
 
 ## Bước 3: Deploy Smart Contracts
 
-> **⚠️ Quan trọng:** Thứ tự deploy đúng là: InterbankTransfer → PKI Registry → Link PKI
+Thứ tự deploy đúng là: InterbankTransfer → PKI Registry → Link PKI
 
 ### 3.1. Di chuyển đến thư mục smart contracts
 
@@ -614,7 +618,7 @@ unset NODE_TLS_REJECT_UNAUTHORIZED
 3. Deposit 100 ETH cho mỗi user vào contract
 4. Tự động cập nhật contract address trong GUI config
 
-**⭐ Lưu ý về Withdraw Function:**
+**Lưu ý về Withdraw Function:**
 - Contract đã có `withdraw()` function để rút tiền từ contract balance
 - Khi rút tiền, số dư sẽ được trừ từ contract balance (không phải native ETH)
 - Withdraw function yêu cầu KYC verification nếu PKI enabled
@@ -739,11 +743,11 @@ Nếu có code (không phải "0x"), contract đã được deploy! ✅
 
 ### 3.5. Deploy PKI Registry
 
-> **⚠️ QUAN TRỌNG:** Bước này **PHẢI** được thực hiện **SAU KHI**:
-> - ✅ Blockchain đã khởi động và sẵn sàng (Bước 1 & 2)
-> - ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.4)
+Bước này **PHẢI** được thực hiện **SAU KHI**:
+- ✅ Blockchain đã khởi động và sẵn sàng (Bước 1 & 2)
+- ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.4)
 
-**⭐ Bước mới:** Deploy PKI Registry để quản lý users
+Deploy PKI Registry để quản lý users
 
 **Tổng quan PKI Registry:**
 - ✅ **User Identity Management** - Lưu PQC public keys (Dilithium3)
@@ -794,7 +798,7 @@ PKI Registry Contract Deployment
 ========================================
 ```
 
-**⚠️ QUAN TRỌNG:** Script `deploy_pki.js` chỉ đăng ký 2 test users. Để đăng ký **TẤT CẢ** users (6 users từ GUI), cần:
+Script `deploy_pki.js` chỉ đăng ký 2 test users. Để đăng ký **TẤT CẢ** users (6 users từ GUI), cần:
 
 **Bước 1: Fund users với native ETH (để trả gas fee)**
 
@@ -820,7 +824,55 @@ Script `register_all_users_pki.js` sẽ:
 - ✅ Set authorization với daily limit 100 ETH
 
 **Nếu gặp lỗi "User not registered" trong GUI:**
-→ Chạy cả 2 scripts: `fund_users_for_pki.js` → `register_all_users_pki.js`
+→ Cần fund native ETH và đăng ký users vào PKI Registry:
+
+```bash
+cd Besu-hyperledger/smart_contracts
+
+# Bước 1: Fund native ETH cho các GUI users (để trả gas fee)
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+RPC_ENDPOINT=https://localhost:21001 node -e "
+const ethers = require('ethers');
+const provider = new ethers.JsonRpcProvider('https://localhost:21001');
+const owner = new ethers.Wallet('0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63', provider);
+const users = [
+  '0x6423CfdF2B3E2E94613266631f22EA0e8788e34e',  // VCB User 1
+  '0x1444808f0AfF7ec6008A416450Dd4e14069d436D',  // VCB User 2
+  '0x469Bb95e092005ba56a786fAAAE10BA38285E1c8',  // VTB User 1
+  '0x2e27a0742fbbF51245b606DF46165e7eFa412b7C',  // VTB User 2
+  '0x12B7D41e4Cf1f380a838067127a32E30B42b3e73',  // BIDV User 1
+  '0x21f0e22d5974Ecd5EDC1efDF1135A39Ff1474E9D'   // BIDV User 2
+];
+(async () => {
+  let nonce = await provider.getTransactionCount(owner.address, 'pending');
+  for (const addr of users) {
+    const tx = await owner.sendTransaction({
+      to: addr,
+      value: ethers.parseEther('1'),
+      gasPrice: 0,
+      nonce: nonce++
+    });
+    console.log('✅ Funded', addr.substring(0, 10) + '...');
+    await tx.wait(1);
+  }
+})()
+"
+
+# Bước 2: Đăng ký tất cả GUI users vào PKI Registry
+RPC_ENDPOINT=https://localhost:21001 node scripts/register_all_users_pki.js
+unset NODE_TLS_REJECT_UNAUTHORIZED
+```
+
+**Script `register_all_users_pki.js` sẽ:**
+- ✅ Đăng ký 6 GUI users (VCB User 1, VCB User 2, VTB User 1, VTB User 2, BIDV User 1, BIDV User 2)
+- ✅ Mỗi user tự đăng ký với mock PQC public key
+- ✅ Verify KYC cho mỗi user (bởi bank tương ứng)
+- ✅ Set authorization với daily limit 100 ETH cho mỗi user
+
+**Lưu ý:**
+- Các users cần có native ETH balance (≥1 ETH) để trả gas fee khi đăng ký
+- Nếu users đã có contract balance nhưng chưa có native ETH, cần fund native ETH trước
+- Script sẽ skip các users đã được đăng ký trước đó
 
 **PKI Features:**
 
@@ -846,11 +898,11 @@ Script `register_all_users_pki.js` sẽ:
 
 ### 3.6. Link PKI to InterbankTransfer
 
-> **⚠️ QUAN TRỌNG:** Bước này **PHẢI** được thực hiện **SAU KHI**:
-> - ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.4)
-> - ✅ PKI Registry contract đã được deploy (Bước 3.5)
+Bước này **PHẢI** được thực hiện **SAU KHI**:
+- ✅ InterbankTransfer contract đã được deploy (Bước 3.1-3.4)
+- ✅ PKI Registry contract đã được deploy (Bước 3.5)
 
-**⭐ Bước quan trọng:** Kết nối PKI vào InterbankTransfer
+Kết nối PKI vào InterbankTransfer
 
 ```bash
 # Link contracts
@@ -921,9 +973,7 @@ export const PKI_REGISTRY_ADDRESS = '0x...';
 
 ✅ **Tất cả contracts đã sẵn sàng!**
 
-### 3.8. ⚠️ BẮT BUỘC: Bật ZKP Balance Proof
-
-> **⚠️ QUAN TRỌNG:** ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security cho hệ thống.  
+### 3.8. Bật ZKP Balance Proof  
 > Mục tiêu: Chứng minh **balance > amount** mà không tiết lộ giá trị balance thực tế. Bước này thêm BalanceVerifier và ZKP Prover.
 
 **📋 Kiến trúc ZKP (Off-Chain Proof Generation):**
@@ -1126,9 +1176,9 @@ Bạn sẽ thấy:
   - 💸 **Transfer functionality** (tích hợp trong Dashboard)
 - Menu điều hướng đầy đủ
 
-### 4.6. Accept TLS Certificate (BẮT BUỘC)
+### 4.6. Accept TLS Certificate
 
-**⚠️ QUAN TRỌNG:** Do sử dụng self-signed certificate, trình duyệt sẽ từ chối kết nối HTTPS. Bạn **PHẢI** chấp nhận certificate trước khi sử dụng GUI.
+Do sử dụng self-signed certificate, trình duyệt sẽ từ chối kết nối HTTPS. Bạn **PHẢI** chấp nhận certificate trước khi sử dụng GUI.
 
 **Cách 1: Accept trong browser** (Nhanh nhất - Khuyên dùng)
 
@@ -1207,11 +1257,163 @@ Nếu thấy `✅ Success: {jsonrpc: "2.0", id: 1, result: "0x..."}` → Certifi
 2. Chọn user (User 1 hoặc User 2)
 3. Kiểm tra số dư hiển thị đúng (100,000,000 VND = 100 ETH)
 
+### 4.8. Fix lỗi "User not registered" trong GUI
+
+**Nếu gặp lỗi "execution reverted: User not registered" khi transfer trong GUI:**
+
+**Nguyên nhân:** PKI enabled nhưng các GUI users chưa được đăng ký trong PKI Registry.
+
+**Giải pháp:**
+
+```bash
+cd Besu-hyperledger/smart_contracts
+
+# Bước 1: Fund native ETH cho các GUI users (để trả gas fee khi đăng ký)
+export NODE_TLS_REJECT_UNAUTHORIZED=0
+RPC_ENDPOINT=https://localhost:21001 node -e "
+const ethers = require('ethers');
+const provider = new ethers.JsonRpcProvider('https://localhost:21001');
+const owner = new ethers.Wallet('0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63', provider);
+const users = [
+  '0x6423CfdF2B3E2E94613266631f22EA0e8788e34e',  // VCB User 1
+  '0x1444808f0AfF7ec6008A416450Dd4e14069d436D',  // VCB User 2
+  '0x469Bb95e092005ba56a786fAAAE10BA38285E1c8',  // VTB User 1
+  '0x2e27a0742fbbF51245b606DF46165e7eFa412b7C',  // VTB User 2
+  '0x12B7D41e4Cf1f380a838067127a32E30B42b3e73',  // BIDV User 1
+  '0x21f0e22d5974Ecd5EDC1efDF1135A39Ff1474E9D'   // BIDV User 2
+];
+(async () => {
+  let nonce = await provider.getTransactionCount(owner.address, 'pending');
+  for (const addr of users) {
+    const tx = await owner.sendTransaction({
+      to: addr,
+      value: ethers.parseEther('1'),
+      gasPrice: 0,
+      nonce: nonce++
+    });
+    console.log('✅ Funded', addr.substring(0, 10) + '...');
+    await tx.wait(1);
+  }
+})()
+"
+
+# Bước 2: Đăng ký tất cả GUI users vào PKI Registry
+RPC_ENDPOINT=https://localhost:21001 node scripts/register_all_users_pki.js
+unset NODE_TLS_REJECT_UNAUTHORIZED
+```
+
+**Script `register_all_users_pki.js` sẽ:**
+- ✅ Đăng ký 6 GUI users (VCB User 1, VCB User 2, VTB User 1, VTB User 2, BIDV User 1, BIDV User 2)
+- ✅ Mỗi user tự đăng ký với mock PQC public key (self-register)
+- ✅ Verify KYC cho mỗi user (bởi bank tương ứng)
+- ✅ Set authorization với daily limit 100 ETH cho mỗi user
+
+**Kết quả mong đợi:**
+```
+✅ Self-registered
+✅ KYC verified by [BANK]
+✅ Authorization set (100 ETH daily limit)
+```
+
+**Lưu ý:**
+- Các users cần có **native ETH balance** (≥1 ETH) để trả gas fee khi đăng ký
+- Nếu users đã có contract balance nhưng chưa có native ETH, cần fund native ETH trước
+- Script sẽ skip các users đã được đăng ký trước đó
+- Sau khi đăng ký, users có thể transfer trong GUI mà không gặp lỗi "User not registered"
+
+### 4.9. Bảo vệ Thông tin Nhạy cảm với Password
+
+Thông tin định danh và PKI được bảo vệ bằng password.
+
+**Tính năng:**
+
+- ✅ **User Identity Card:**
+  - Password protection cho: ngày sinh, CMND/CCCD, số điện thoại, email, địa chỉ, private key
+  - Masking địa chỉ blockchain mặc định (có thể toggle để hiện đầy đủ)
+  - Auto-logout sau 5 phút không hoạt động
+  - Nút "Lock" để khóa lại thủ công
+
+- ✅ **User Profile Card (PKI):**
+  - Password protection cho: KYC dates, permissions, daily limits, PQC public key
+  - Masking PQC Public Key mặc định (có thể toggle)
+  - Auto-logout sau 5 phút không hoạt động
+  - Nút "Lock" để khóa lại thủ công
+
+**Password mặc định:**
+
+Format: `{Tên ngân hàng}:User:{Số thứ tự}`
+
+- **Vietcombank User 1:** `Vietcombank:User:1`
+- **Vietcombank User 2:** `Vietcombank:User:2`
+- **VietinBank User 1:** `VietinBank:User:1`
+- **VietinBank User 2:** `VietinBank:User:2`
+- **BIDV User 1:** `BIDV:User:1`
+- **BIDV User 2:** `BIDV:User:2`
+
+**Lưu ý:**
+- Password được lưu trong `config/banks.ts`
+- Trong production, cần tích hợp với hệ thống authentication thật
+- Auto-logout đảm bảo thông tin không bị lộ khi user quên khóa
+
+### 4.10. Thông tin Định danh Người dùng
+
+Mỗi user có thông tin định danh đầy đủ để mô phỏng hệ thống thật.
+
+**Thông tin định danh:**
+
+- ✅ **Tên đầy đủ** (`fullName`) - Luôn hiển thị
+- ✅ **Ngày sinh** (`dateOfBirth`) - Bảo vệ bằng password
+- ✅ **CMND/CCCD** (`idNumber`) - Bảo vệ bằng password
+- ✅ **Số điện thoại** (`phone`) - Bảo vệ bằng password
+- ✅ **Email** (`email`) - Bảo vệ bằng password
+- ✅ **Địa chỉ thường trú** (`addressLine`) - Bảo vệ bằng password
+- ✅ **Giới tính** (`gender`) - Bảo vệ bằng password
+
+**Hiển thị:**
+
+- Thông tin được hiển thị trong `UserIdentityCard` component
+- Tên đầy đủ luôn hiển thị (không cần password)
+- Các thông tin nhạy cảm cần password để xem
+- Địa chỉ blockchain được mask mặc định (có thể toggle)
+
+**Cấu hình:**
+
+- Thông tin được định nghĩa trong `config/banks.ts`
+- Mỗi user có đầy đủ thông tin định danh
+- Dữ liệu mock nhưng realistic để demo
+
+### 4.11. Xử lý Lỗi "Known Transaction"
+
+GUI tự động xử lý lỗi "Known transaction" một cách graceful.
+
+**Nguyên nhân:**
+
+- Transaction đã được gửi nhưng blockchain từ chối vì đã biết đến
+- Có thể do user click submit nhiều lần hoặc retry logic
+
+**Giải pháp:**
+
+- ✅ **Protection trong code:**
+  - Tracking pending transactions để tránh gửi duplicate
+  - Kiểm tra `isProcessing` để tránh double-submit
+  - Button tự động disabled khi đang xử lý
+
+- ✅ **Xử lý lỗi graceful:**
+  - Khi gặp lỗi "Known transaction", hiển thị thông báo thành công
+  - Thông báo: "Transaction đã được gửi trước đó. Vui lòng đợi transaction được xác nhận."
+  - Tự động reload balance sau 2 giây
+  - Không coi đây là lỗi nghiêm trọng
+
+**Lưu ý:**
+- Lỗi này thường xảy ra khi network chậm hoặc user click nhiều lần
+- GUI tự động xử lý và không cần user can thiệp
+- Transaction vẫn được xử lý bình thường trên blockchain
+
 ---
 
 ## Bước 5: Benchmark với Lacchain Ethereum-Benchmark
 
-> **⭐ MỚI:** Sử dụng Lacchain Ethereum-Benchmark để đo hiệu năng (TPS, latency) của hệ thống InterbankTransfer.
+Sử dụng Lacchain Ethereum-Benchmark để đo hiệu năng (TPS, latency) của hệ thống InterbankTransfer.
 
 ### 5.1. Giới thiệu Lacchain Ethereum-Benchmark
 
@@ -1244,7 +1446,7 @@ cd ethereum-benchmark
 
 ### 5.3. Chuẩn bị trước khi benchmark
 
-**⚠️ QUAN TRỌNG:** Trước khi chạy benchmark, cần:
+Trước khi chạy benchmark, cần:
 
 1. **Blockchain đang chạy:**
    ```bash
@@ -1257,7 +1459,9 @@ cd ethereum-benchmark
    cat smart_contracts/contracts/InterbankTransfer.address.txt
    ```
 
-3. **Tắt PKI/ZKP (khuyến nghị):**
+3. **Chọn một trong hai cách:**
+
+   **Cách A: Tắt PKI/ZKP (khuyến nghị cho benchmark hiệu năng):**
    ```bash
    cd smart_contracts
    export NODE_TLS_REJECT_UNAUTHORIZED=0
@@ -1265,12 +1469,26 @@ cd ethereum-benchmark
    RPC_ENDPOINT=https://localhost:21001 node scripts/toggle_zkp.js false
    unset NODE_TLS_REJECT_UNAUTHORIZED
    ```
-   
    **Lý do:** PKI/ZKP sẽ làm chậm transactions và ảnh hưởng đến kết quả benchmark.
+   
+   **Cách B: Giữ PKI enabled (để test với security features):**
+   ```bash
+   cd ethereum-benchmark
+   
+   # Bước 1: Fund accounts với native ETH
+   ./prepare-benchmark.sh 100 10
+   
+   # Bước 2: Deposit balance vào contract
+   node server/deposit-contract-balances.js
+   
+   # Bước 3: Đăng ký accounts vào PKI Registry
+   node server/register-pki-accounts.js
+   ```
+   **Lưu ý:** Với PKI enabled, cần đảm bảo tất cả accounts đã được đăng ký, nếu không sẽ gặp lỗi "User not registered".
 
 4. **Fund accounts cho benchmark (BẮT BUỘC cho multi-user benchmark):**
    
-   **⭐ MỚI:** Để chạy benchmark với nhiều users (10+ TPS), cần fund nhiều accounts trước:
+   Để chạy benchmark với nhiều users (10+ TPS), cần fund nhiều accounts trước:
    
    ```bash
    cd ethereum-benchmark
@@ -1281,8 +1499,9 @@ cd ethereum-benchmark
    - ✅ Kiểm tra blockchain đang chạy
    - ✅ Kiểm tra contract address
    - ✅ Cài đặt dependencies nếu cần
-   - ✅ Fund 100 accounts với 10 ETH mỗi account
+   - ✅ Fund 100 accounts với 10 ETH mỗi account (native ETH trong wallet)
    - ✅ Tổng cần: 1000 ETH từ owner account
+   - ✅ Lưu private keys vào `server/funded-accounts.json`
    
    **Tham số:**
    - `100` - Số lượng accounts cần fund
@@ -1294,9 +1513,51 @@ cd ethereum-benchmark
    - Script chỉ cần chạy 1 lần, accounts sẽ được fund và sẵn sàng cho các lần benchmark sau
    
    **Lacchain tự động:**
-   - Generate random accounts cho mỗi transaction
+   - Load pre-funded accounts từ `server/funded-accounts.json`
    - Mỗi transaction sẽ dùng một account khác nhau
    - Tự động quản lý nonce cho mỗi account
+
+5. **Deposit balance vào contract (BẮT BUỘC nếu PKI enabled):**
+   
+   Nếu PKI enabled, accounts cần có balance trong InterbankTransfer contract (không chỉ native ETH):
+   
+   ```bash
+   cd ethereum-benchmark
+   node server/deposit-contract-balances.js
+   ```
+   
+   **Script này sẽ:**
+   - ✅ Load funded accounts từ `server/funded-accounts.json`
+   - ✅ Authorize các accounts trong InterbankTransfer contract
+   - ✅ Deposit 10 ETH vào contract balance cho mỗi account
+   - ✅ Tổng cần: 1000 ETH từ owner account (cho 100 accounts)
+   
+   **Lưu ý:**
+   - Script này chỉ cần chạy 1 lần sau khi fund accounts
+   - Nếu PKI disabled, có thể bỏ qua bước này
+   - Contract balance khác với native ETH balance
+
+6. **Đăng ký accounts vào PKI Registry (BẮT BUỘC nếu PKI enabled):**
+   
+   Nếu PKI enabled, accounts **PHẢI** được đăng ký trong PKI Registry trước khi transfer:
+   
+   ```bash
+   cd ethereum-benchmark
+   node server/register-pki-accounts.js
+   ```
+   
+   **Script này sẽ:**
+   - ✅ Load funded accounts từ `server/funded-accounts.json`
+   - ✅ Đăng ký từng account vào PKI Registry (self-register với mock PQC public key)
+   - ✅ Verify KYC cho mỗi account (bởi owner/authorized bank)
+   - ✅ Set authorization với daily limit 100 ETH cho mỗi account
+   - ✅ Mỗi account cần 3 transactions: register → verify KYC → set authorization
+   
+   **Lưu ý:**
+   - Script này chỉ cần chạy 1 lần sau khi fund accounts
+   - Nếu PKI disabled, có thể bỏ qua bước này
+   - Quá trình đăng ký mất thời gian (với 200 accounts ≈ 600 transactions)
+   - Script tự động quản lý nonce để tránh conflicts
 
 ### 5.4. Chạy Benchmark
 
@@ -1313,16 +1574,30 @@ cd ethereum-benchmark
 ./RUN_BENCHMARK.sh 5 2  # 5 TPS trong 2 phút
 ```
 
-**⭐ Benchmark với nhiều users (10+ TPS):**
+**Benchmark với nhiều users (10+ TPS):**
 
-**Bước 1: Fund accounts (chỉ cần làm 1 lần)**
+**Bước 1: Fund accounts với native ETH (chỉ cần làm 1 lần)**
 ```bash
 cd ethereum-benchmark
 ./prepare-benchmark.sh 100 10
 ```
-→ Fund 100 accounts với 10 ETH mỗi account
+→ Fund 100 accounts với 10 ETH mỗi account (native ETH trong wallet)
 
-**Bước 2: Chạy benchmark 10 TPS**
+**Bước 2: Deposit balance vào contract (nếu PKI enabled)**
+```bash
+node server/deposit-contract-balances.js
+```
+→ Deposit 10 ETH vào contract balance cho mỗi account
+→ Authorize các accounts trong InterbankTransfer contract
+
+**Bước 3: Đăng ký accounts vào PKI Registry (nếu PKI enabled)**
+```bash
+node server/register-pki-accounts.js
+```
+→ Đăng ký, verify KYC, và set authorization cho tất cả accounts
+→ Mỗi account cần 3 transactions (register → KYC → authorization)
+
+**Bước 4: Chạy benchmark 10 TPS**
 ```bash
 ./RUN_BENCHMARK.sh 10 2
 ```
@@ -1368,7 +1643,7 @@ environment:
 - **TPS trung bình (10-20):** Để test hiệu năng thực tế, **CẦN fund accounts trước** (`./prepare-benchmark.sh`)
 - **TPS cao (50+):** Để stress test, có thể gây nonce issues, cần fund nhiều accounts hơn
 
-**⭐ Multi-User Benchmark:**
+**Multi-User Benchmark:**
 - Lacchain tự động generate random accounts cho mỗi transaction
 - Mỗi transaction dùng một account khác nhau → tránh nonce congestion
 - Cần fund accounts trước khi chạy benchmark 10+ TPS
@@ -1421,11 +1696,37 @@ timestamp_ms,transaction_number
 - **Nguyên nhân:** TPS quá cao, nonce không kịp sync
 - **Giải pháp:** Giảm `DESIRED_RATE_TX` xuống 1-5 TPS
 
-**Lỗi: "execution reverted"**
+**Lỗi: "execution reverted: User not registered"**
+- **Nguyên nhân:** PKI enabled nhưng accounts chưa được đăng ký trong PKI Registry
+- **Giải pháp:** 
+  ```bash
+  cd ethereum-benchmark
+  # Bước 1: Fund accounts với native ETH
+  ./prepare-benchmark.sh 100 10
+  
+  # Bước 2: Deposit balance vào contract
+  node server/deposit-contract-balances.js
+  
+  # Bước 3: Đăng ký accounts vào PKI Registry
+  node server/register-pki-accounts.js
+  ```
+  - Hoặc tắt PKI tạm thời: `node scripts/public/toggle_pki.js false`
+
+**Lỗi: "execution reverted: Insufficient balance"**
+- **Nguyên nhân:** Account không có balance trong InterbankTransfer contract (chỉ có native ETH)
+- **Giải pháp:** 
+  ```bash
+  cd ethereum-benchmark
+  node server/deposit-contract-balances.js
+  ```
+
+**Lỗi: "execution reverted" (khác)**
 - **Nguyên nhân:** PKI/ZKP enabled hoặc account không đủ balance
 - **Giải pháp:** 
   - Tắt PKI/ZKP: `node scripts/public/toggle_pki.js false`
   - Fund accounts: `./prepare-benchmark.sh 100 10`
+  - Deposit contract balance: `node server/deposit-contract-balances.js`
+  - Register PKI: `node server/register-pki-accounts.js`
 
 **Lỗi: "insufficient funds" hoặc "out of gas"**
 - **Nguyên nhân:** Accounts chưa được fund với ETH
@@ -1439,6 +1740,47 @@ timestamp_ms,transaction_number
 - **Nguyên nhân:** Self-signed certificate không được chấp nhận
 - **Giải pháp:** Đảm bảo `NODE_TLS_REJECT_UNAUTHORIZED=0` trong docker-compose
 
+**Lỗi: "execution reverted: User not registered" (trong GUI web):**
+- **Nguyên nhân:** PKI enabled nhưng GUI users chưa được đăng ký trong PKI Registry
+- **Giải pháp:** 
+  ```bash
+  cd Besu-hyperledger/smart_contracts
+  
+  # Bước 1: Fund native ETH cho GUI users
+  export NODE_TLS_REJECT_UNAUTHORIZED=0
+  RPC_ENDPOINT=https://localhost:21001 node -e "
+  const ethers = require('ethers');
+  const provider = new ethers.JsonRpcProvider('https://localhost:21001');
+  const owner = new ethers.Wallet('0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63', provider);
+  const users = [
+    '0x6423CfdF2B3E2E94613266631f22EA0e8788e34e',  // VCB User 1
+    '0x1444808f0AfF7ec6008A416450Dd4e14069d436D',  // VCB User 2
+    '0x469Bb95e092005ba56a786fAAAE10BA38285E1c8',  // VTB User 1
+    '0x2e27a0742fbbF51245b606DF46165e7eFa412b7C',  // VTB User 2
+    '0x12B7D41e4Cf1f380a838067127a32E30B42b3e73',  // BIDV User 1
+    '0x21f0e22d5974Ecd5EDC1efDF1135A39Ff1474E9D'   // BIDV User 2
+  ];
+  (async () => {
+    let nonce = await provider.getTransactionCount(owner.address, 'pending');
+    for (const addr of users) {
+      const tx = await owner.sendTransaction({
+        to: addr,
+        value: ethers.parseEther('1'),
+        gasPrice: 0,
+        nonce: nonce++
+      });
+      console.log('✅ Funded', addr.substring(0, 10) + '...');
+      await tx.wait(1);
+    }
+  })()
+  "
+  
+  # Bước 2: Đăng ký GUI users vào PKI Registry
+  RPC_ENDPOINT=https://localhost:21001 node scripts/register_all_users_pki.js
+  unset NODE_TLS_REJECT_UNAUTHORIZED
+  ```
+  - Hoặc tắt PKI tạm thời: `node scripts/public/toggle_pki.js false`
+
 ### 5.8. Best Practices
 
 1. **Bắt đầu với TPS thấp:**
@@ -1447,8 +1789,10 @@ timestamp_ms,transaction_number
    - Không cần fund accounts cho TPS thấp (1-5)
 
 2. **Fund accounts cho benchmark cao (10+ TPS):**
-   - Chạy `./prepare-benchmark.sh 100 10` trước khi benchmark
-   - Đảm bảo owner account có đủ ETH (≥1000 ETH cho 100 accounts)
+   - **Bước 1:** Chạy `./prepare-benchmark.sh 100 10` để fund native ETH
+   - **Bước 2:** Chạy `node server/deposit-contract-balances.js` để deposit contract balance (nếu PKI enabled)
+   - **Bước 3:** Chạy `node server/register-pki-accounts.js` để đăng ký PKI (nếu PKI enabled)
+   - Đảm bảo owner account có đủ ETH (≥1000 ETH cho 100 accounts × 2 = 2000 ETH nếu PKI enabled)
    - Có thể giảm số accounts nếu không đủ ETH
 
 3. **Tắt PKI/ZKP khi benchmark:**
@@ -1471,35 +1815,21 @@ timestamp_ms,transaction_number
 
 7. **Multi-User Benchmark:**
    - Sử dụng nhiều accounts để tránh nonce congestion
-   - Lacchain tự động generate và quản lý accounts
+   - Lacchain tự động load pre-funded accounts từ `server/funded-accounts.json`
    - Mỗi transaction dùng một account khác nhau → hiệu năng cao hơn
-
-### 5.9. So sánh với Caliper
-
-**Lacchain vs Caliper:**
-
-| **Tiêu chí** | **Lacchain** | **Caliper** |
-|-------------|-------------|-------------|
-| Setup | ⭐⭐⭐ Dễ (5-10 phút) | ⭐⭐ Trung bình (15-30 phút) |
-| Besu Support | ✅✅✅ Rất tốt | ✅✅ Tốt |
-| Docker Support | ✅ Có sẵn | ⚠️ Cần config |
-| Nonce Management | ✅ Tự động | ⚠️ Cần config |
-| TPS Measurement | ✅ Tự động | ✅ Tự động |
-| Latency Measurement | ✅ Tự động | ✅ Tự động |
-| Report Generation | ✅ Log files | ✅ HTML report |
-| Multi-Account | ✅ Hỗ trợ | ✅ Hỗ trợ |
-
-**Kết luận:** Lacchain phù hợp hơn cho Besu, dễ setup và ít lỗi nonce hơn Caliper.
+   - **Nếu PKI enabled:** Cần đảm bảo accounts đã được:
+     - ✅ Fund với native ETH (`./prepare-benchmark.sh`)
+     - ✅ Deposit balance vào contract (`node server/deposit-contract-balances.js`)
+     - ✅ Đăng ký trong PKI Registry (`node server/register-pki-accounts.js`)
 
 ---
 
 ## 📝 Lưu ý quan trọng
 
 1. **Thứ tự thực hiện:** 
-   - TLS Setup (0A) → PQC/KSM Setup (0B) → **Blockchain (1)** → Deploy InterbankTransfer (3.1-3.4) → **Deploy PKI Registry (3.5)** → Link PKI (3.6) → **Deploy ZKP Balance Proof (3.8)** ⚠️ → Web GUI (4) → **Benchmark (5)** ⭐
-   - **⚠️ QUAN TRỌNG:** 
-     - Blockchain **PHẢI** chạy trước khi deploy bất kỳ contract nào (bao gồm PKI Registry và ZKP)!
-     - ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security!
+   - TLS Setup (0A) → PQC/KSM Setup (0B) → **Blockchain (1)** → Deploy InterbankTransfer (3.1-3.4) → **Deploy PKI Registry (3.5)** → Link PKI (3.6) → **Deploy ZKP Balance Proof (3.8)** → Web GUI (4) → **Benchmark (5)**
+   - Blockchain **PHẢI** chạy trước khi deploy bất kỳ contract nào (bao gồm PKI Registry và ZKP)!
+   - ZKP Balance Proof là **BẮT BUỘC** để đảm bảo privacy và security!
 2. **Thời gian chờ:** Blockchain cần 1-2 phút để khởi động hoàn toàn
 3. **Contract address:** 
    - Mỗi lần deploy sẽ có address mới, script sẽ tự động cập nhật GUI config
@@ -1517,7 +1847,7 @@ timestamp_ms,transaction_number
    - Generate keys cho banks sau khi KSM ready
    - Check health: `curl http://localhost:8080/ksm/health`
    - Check logs: `docker logs ksm-service`
-   - **🔒 PQC ENABLED BY DEFAULT trong GUI** (Dec 2025) - không cần config
+   - PQC enabled by default trong GUI (Dec 2025) - không cần config
    - PQC implementation hiện tại là simulation - thay bằng thư viện thực trong production
    - **Build fixes (Dec 2025):** Fixed package structure issues, eliminated duplicate PQC folder
    - **Configuration:** `GUI/web/config/pqc.ts` với `PQC_ENABLED_DEFAULT = true`
@@ -1530,15 +1860,15 @@ timestamp_ms,transaction_number
      - ✅ Hiển thị contract address đang sử dụng để debug
      - ✅ Better error handling và logging
    - **Contract address management:** Scripts tự động sync address, không cần manual update
-8. **⚠️ ZKP Balance Proof (BẮT BUỘC):**
-   - **⚠️ QUAN TRỌNG:** ZKP là bắt buộc để đảm bảo privacy và security
+8. **ZKP Balance Proof:**
+   - ZKP là bắt buộc để đảm bảo privacy và security
    - Start prover: `cd prover && cargo build --release && RUST_LOG=info ./target/release/zkp-prover &`
    - Deploy verifier: `RPC_ENDPOINT=https://localhost:21001 node scripts/deploy_balance_verifier.js`
    - Link & enable: `node scripts/set_balance_verifier.js`, `node scripts/toggle_zkp.js`
    - GUI endpoint: set `NEXT_PUBLIC_ZKP_PROVER_URL=http://localhost:8081`
    - **Chi tiết:** Xem [ZKP_IMPLEMENTATION.md](../../ZKP_IMPLEMENTATION.md)
 9. **PKI Registry:**
-   - **⚠️ Thứ tự quan trọng:** PKI Registry **PHẢI** được deploy **SAU KHI** blockchain đã chạy và InterbankTransfer đã được deploy
+   - PKI Registry **PHẢI** được deploy **SAU KHI** blockchain đã chạy và InterbankTransfer đã được deploy
    - Deploy PKI: `node scripts/deploy_pki.js` (sau Bước 1 & 2)
    - Link PKI: `node scripts/link_pki_interbank.js` (sau khi cả 2 contracts đã deploy)
    - Test PKI: `node scripts/test_pki.js` (optional, để verify)
@@ -1549,7 +1879,13 @@ timestamp_ms,transaction_number
    - Khuyến nghị: Tắt PKI/ZKP khi benchmark để có kết quả chính xác
    - Kết quả lưu trong `server/logs/`
    - **Chi tiết:** Xem [Bước 5: Benchmark với Lacchain Ethereum-Benchmark](#bước-5-benchmark-với-lacchain-ethereum-benchmark)
-11. **Bảo mật:** 
+11. **GUI Features (Dec 2025):**
+   - ✅ **Auto-Sync:** Transactions tự động sync lên blockchain, không cần bấm nút thủ công
+   - ✅ **Password Protection:** Thông tin nhạy cảm được bảo vệ bằng password
+   - ✅ **User Identity:** Thông tin định danh đầy đủ (tên, ngày sinh, CMND, phone, email, địa chỉ)
+   - ✅ **Error Handling:** Tự động xử lý lỗi "Known transaction" một cách graceful
+   - **Chi tiết:** Xem [Bước 4.9-4.11](#bước-4-khởi-động-web-gui)
+12. **Bảo mật:** 
    - Password mặc định của keystores là `changeit` - đổi trong production!
    - Root CA private key được mã hóa tại `config/tls/ca/private/sbv-root-ca.key`
    - PQC private keys lưu trong memory - cần HSM trong production
@@ -1583,13 +1919,11 @@ timestamp_ms,transaction_number
 
 ## 🎯 System Architecture Summary
 
-**Hệ thống đầy đủ theo báo cáo NT219_BaoCaoTienDo-2.pdf:**
-
 ```
 ┌────────────────────────────────────────────┐
 │         USER LAYER                          │
 │  Browser → http://localhost:3000           │
-│  Pages: Home | Dashboard (all-in-one) ⭐   │
+│  Pages: Home | Dashboard (all-in-one)   │
 │  Dashboard: Balance + PKI + Charts + Transfer │
 └────────────────────────────────────────────┘
                     ↓
@@ -1597,23 +1931,23 @@ timestamp_ms,transaction_number
 │         SECURITY LAYER                      │
 │  • TLS 1.3 (RSA 4096 + AES-GCM-256)        │
 │  • PQC Signatures (Dilithium3)             │
-│  • PKI Registry (KYC + Auth) ⭐            │
-│  • ZKP Balance Proof ⚠️ BẮT BUỘC          │
+│  • PKI Registry (KYC + Auth)            │
+│  • ZKP Balance Proof          │
 └────────────────────────────────────────────┘
                     ↓
 ┌────────────────────────────────────────────┐
 │         BLOCKCHAIN LAYER                    │
 │  • 8 Besu Nodes (QBFT Consensus)           │
 │  • Smart Contracts:                         │
-│    - InterbankTransfer (with PKI + ZKP) ⭐ │
-│    - PKIRegistry ⭐                         │
-│    - BalanceVerifier ⚠️ BẮT BUỘC           │
+│    - InterbankTransfer (with PKI + ZKP)  │
+│    - PKIRegistry                          │
+│    - BalanceVerifier          │
 └────────────────────────────────────────────┘
                     ↓
 ┌────────────────────────────────────────────┐
 │         SERVICE LAYER                       │
 │  • KSM (Port 8080) - PQC signing           │
-│  • ZKP Prover (Port 8081) - Balance Proof ⚠️ BẮT BUỘC │
+│  • ZKP Prover (Port 8081) - Balance Proof │
 └────────────────────────────────────────────┘
                     ↓
 ┌────────────────────────────────────────────┐
@@ -1625,24 +1959,32 @@ timestamp_ms,transaction_number
 ```
 
 **Deployed Contracts:**
-- ✅ `InterbankTransfer` - Main transfer logic + PKI integration ⭐
-- ✅ `PKIRegistry` - User identity, KYC, authorization ⭐
-- ✅ `BalanceVerifier` - ZK proof verification (Balance > Amount) ⚠️ **BẮT BUỘC**
+- ✅ `InterbankTransfer` - Main transfer logic + PKI integration 
+- ✅ `PKIRegistry` - User identity, KYC, authorization 
+- ✅ `BalanceVerifier` - ZK proof verification (Balance > Amount) 
 
 **Services Running:**
 - ✅ 8x Besu Nodes (blockchain)
 - ✅ KSM Service (PQC signing - Dilithium3)
-- ✅ ZKP Prover (Balance Proof - Port 8081) ⚠️ **BẮT BUỘC**
+- ✅ ZKP Prover (Balance Proof - Port 8081)
 - ✅ Monitoring tools (Blockscout, Grafana)
 
 **GUI Features:**
-- ✅ Home page (bank selection)
-- ✅ **Modern Dashboard** (tất cả tính năng trong một trang) ⭐
+- ✅ Home page (bank selection) với animations
+- ✅ **Modern Dashboard** (tất cả tính năng trong một trang)
   - Balance Card với emerald gradient
   - PKI & Security Info Card (tích hợp)
   - Transaction Analytics Chart (đỏ/xanh)
-  - Stats Cards & Recent Transactions
-  - Transfer functionality (tích hợp với PKI verification) ⭐
+  - Stats Cards & Recent Transactions với animations
+  - Transfer functionality (tích hợp với PKI verification)
+- ✅ **Auto-Sync Transactions**
+  - Tự động sync khi có transaction mới
+  - Sync định kỳ mỗi 30 giây
+  - Không cần bấm nút sync thủ công
+- ✅ **User Identity Management**
+  - Thông tin định danh đầy đủ (tên, ngày sinh, CMND, phone, email, địa chỉ)
+  - Password protection cho thông tin nhạy cảm
+  - Auto-logout sau 5 phút
 
 **Security Features Implemented:**
 - ✅ TLS 1.3 (mTLS ready)
@@ -1650,19 +1992,18 @@ timestamp_ms,transaction_number
 - ✅ RSA 4096-bit certificates
 - ✅ PQC signatures (Dilithium3)
 - ✅ KSM persistent storage (AES-256-CBC)
-- ✅ PKI Registry (KYC + daily limits) ⭐
+- ✅ PKI Registry (KYC + daily limits)
 - ✅ Key rotation support
-- ✅ ZKP Balance Proof (Privacy-preserving verification) ⚠️ **BẮT BUỘC**
+- ✅ ZKP Balance Proof (Privacy-preserving verification)
 
 ---
 
 **Chúc bạn thành công! 🎉**
 
 **📚 Tài liệu tham khảo:**
-- [PKI Integration Guide](../deployment/PKI_INTEGRATION_GUIDE.md) ⭐
-- [ZKP Winterfell Deployment](../deployment/ZKP_WINTERFELL_DEPLOYMENT.md) ⭐
-- [Quy trình triển khai PQC](../deployment/QUY_TRINH_TRIEN_KHAI_PQC.md) ⭐
+- [PKI Integration Guide](../deployment/PKI_INTEGRATION_GUIDE.md)
+- [ZKP Winterfell Deployment](../deployment/ZKP_WINTERFELL_DEPLOYMENT.md)
+- [Quy trình triển khai PQC](../deployment/QUY_TRINH_TRIEN_KHAI_PQC.md)
 - [TLS 1.3 Setup Guide](../deployment/TLS13_SETUP_GUIDE.md)
 
 ---
-

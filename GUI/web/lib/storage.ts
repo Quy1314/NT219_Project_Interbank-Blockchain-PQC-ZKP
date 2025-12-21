@@ -1,6 +1,7 @@
 // Local storage utilities for transactions and user data
 
 import { Transaction } from '@/types/transaction';
+import { auditPKIRegister, auditKYCVerify, auditAuthorizationSet } from './audit';
 
 const STORAGE_KEYS = {
   TRANSACTIONS_PREFIX: 'interbank_transactions_', // Prefix for user-specific transactions
@@ -40,6 +41,28 @@ export const saveTransaction = (transaction: Transaction, bankCode: string, user
   }
 };
 
+/**
+ * Save transaction for both sender and receiver
+ */
+export const saveTransactionForBoth = (transaction: Transaction, senderBankCode: string, senderAddress: string): void => {
+  // Save for sender
+  saveTransaction(transaction, senderBankCode, senderAddress);
+  
+  // Save for receiver (if receiver is a known user in the system)
+  const receiverBankCode = findBankCodeByAddress(transaction.to);
+  if (receiverBankCode) {
+    // Create a copy of transaction for receiver (same transaction, different perspective)
+    const receiverTransaction: Transaction = {
+      ...transaction,
+      // Keep all fields the same - receiver will see it as incoming transaction
+    };
+    saveTransaction(receiverTransaction, receiverBankCode, transaction.to);
+    console.log(`✅ Transaction ${transaction.id} saved for receiver ${transaction.to.substring(0, 10)}... in bank ${receiverBankCode}`);
+  } else {
+    console.log(`ℹ️ Receiver ${transaction.to.substring(0, 10)}... is not a known user, skipping receiver transaction save`);
+  }
+};
+
 export const getTransactions = (): Transaction[] => {
   // This is deprecated - use getTransactionsByUser instead
   // Kept for backward compatibility
@@ -59,6 +82,26 @@ export const getTransactionsByUser = (bankCode: string, address: string): Transa
   } catch {
     return [];
   }
+};
+
+/**
+ * Find bank code for a given address
+ */
+export const findBankCodeByAddress = (address: string): string | null => {
+  // Import here to avoid circular dependency
+  const { getAllUsers, BANKS } = require('@/config/banks');
+  const allUsers = getAllUsers();
+  const user = allUsers.find((u: any) => u.address.toLowerCase() === address.toLowerCase());
+  if (user) {
+    // Find bank code by searching through all banks
+    for (const bank of BANKS) {
+      const foundUser = bank.users.find((u: any) => u.id === user.id);
+      if (foundUser) {
+        return bank.code;
+      }
+    }
+  }
+  return null;
 };
 
 export const deleteTransactionsByUser = (bankCode: string, address: string): void => {

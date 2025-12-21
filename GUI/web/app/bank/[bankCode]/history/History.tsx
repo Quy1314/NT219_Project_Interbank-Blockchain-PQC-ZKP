@@ -36,10 +36,41 @@ export default function History() {
     const bank = getBankByCode(bankCode);
     if (!bank) return;
 
-    const savedUserId = localStorage.getItem('interbank_selected_user');
-    const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
-    setUser(selectedUser);
+    const loadUser = () => {
+      const savedUserId = localStorage.getItem('interbank_selected_user');
+      const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
+      setUser(selectedUser);
+    };
+
+    loadUser();
+
+    // Listen for storage changes (when user changes in layout)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'interbank_selected_user') {
+        loadUser();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also listen for custom event (for same-window changes)
+    const handleUserChange = () => {
+      loadUser();
+    };
+    window.addEventListener('userChanged', handleUserChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userChanged', handleUserChange);
+    };
   }, [bankCode]);
+
+  // Reload transactions when user changes
+  useEffect(() => {
+    if (user) {
+      loadTransactions();
+    }
+  }, [user?.address, bankCode]);
 
   // Function to load transactions and remove duplicates
   const loadTransactions = () => {

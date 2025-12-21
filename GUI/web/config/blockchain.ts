@@ -13,8 +13,8 @@ export const CHAIN_ID = 1337;
 
 // Gas configuration
 // Block gas limit from genesis.json: 0xf7b760 = 16,243,360
-// Max transaction gas limit set to 15,000,000 (safe margin below block limit)
-export const GAS_LIMIT = 15000000; // Max gas limit for transactions
+// Max transaction gas limit set to 16,000,000 (safe margin below block limit)
+export const GAS_LIMIT = 16000000; // Max gas limit for transactions
 export const GAS_PRICE = '0x0'; // Free gas for test network
 
 // Mock Mode: Set to true to enable mock transactions when blockchain balance is insufficient

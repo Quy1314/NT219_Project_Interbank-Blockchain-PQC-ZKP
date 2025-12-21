@@ -9,6 +9,7 @@ import { formatAddress, getBalanceVND, sendTransaction, waitForTransaction, getW
 import { getBalanceForUser } from '@/lib/balances';
 import { isContractDeployed, getContractBalance, withdrawViaContract } from '@/lib/contract';
 import { saveTransaction, generateReferenceCode, updateTransactionStatus, saveUserBalance, getStoredBalance } from '@/lib/storage';
+import { auditWithdrawal } from '@/lib/audit';
 import { Transaction } from '@/types/transaction';
 
 // Withdrawal address: Bank's withdrawal address (burn address for simplicity)
@@ -36,15 +37,42 @@ export default function Withdraw() {
     const bank = getBankByCode(bankCode);
     if (!bank) return;
 
-    const savedUserId = localStorage.getItem('interbank_selected_user');
-    const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
-    setUser(selectedUser);
-    
-    if (selectedUser) {
-      checkContractStatus();
-      loadBalance(selectedUser.address);
-    }
+    const loadUser = () => {
+      const savedUserId = localStorage.getItem('interbank_selected_user');
+      const selectedUser = bank.users.find((u) => u.id === savedUserId) || bank.users[0];
+      setUser(selectedUser);
+    };
+
+    loadUser();
+    checkContractStatus();
+
+    // Listen for storage changes (when user changes in layout)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'interbank_selected_user') {
+        loadUser();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also listen for custom event (for same-window changes)
+    const handleUserChange = () => {
+      loadUser();
+    };
+    window.addEventListener('userChanged', handleUserChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userChanged', handleUserChange);
+    };
   }, [bankCode]);
+
+  // Reload balance when user changes
+  useEffect(() => {
+    if (user) {
+      loadBalance(user.address);
+    }
+  }, [user?.address, bankCode]);
 
   // Check if contract is deployed
   const checkContractStatus = async () => {
@@ -324,6 +352,23 @@ export default function Withdraw() {
           };
           saveTransaction(updatedTransaction, bankCode, user.address);
 
+          // Audit log: Withdrawal success
+          auditWithdrawal(
+            {
+              address: user.address,
+              bankCode: bankCode,
+              userId: user.id,
+            },
+            {
+              amount: amountNum,
+              method: 'ATM',
+              referenceCode: refCode,
+            },
+            'SUCCESS',
+            receipt.transactionHash,
+            receipt.blockNumber
+          );
+
           // Cập nhật số dư sau khi rút tiền thành công
           if (user) {
             // Reload balance từ contract hoặc blockchain để đảm bảo chính xác
@@ -396,6 +441,21 @@ export default function Withdraw() {
             type: 'error',
             text: 'Giao dịch rút tiền thất bại trên blockchain.',
           });
+
+          // Audit log: Withdrawal failed
+          auditWithdrawal(
+            {
+              address: user.address,
+              bankCode: bankCode,
+              userId: user.id,
+            },
+            {
+              amount: amountNum,
+              method: 'ATM',
+              referenceCode: refCode,
+            },
+            'FAILED'
+          );
         } else {
           // Receipt is null - transaction chưa được confirm
           setMessage({

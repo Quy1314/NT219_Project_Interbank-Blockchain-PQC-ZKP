@@ -98,7 +98,7 @@ export const syncTransactionToBlockchain = async (
 
     // Kiểm tra số dư trước khi gửi transaction
     const balance = await provider.getBalance(wallet.address);
-    const gasLimit = BigInt(15000000); // Max gas limit (block limit is 16,243,360)
+    const gasLimit = BigInt(16000000); // Max gas limit (block limit is 16,243,360)
     const gasPrice = BigInt(0); // Free gas for private test network
     const gasCost = gasLimit * gasPrice; // = 0
     const totalCost = amountWei + gasCost;

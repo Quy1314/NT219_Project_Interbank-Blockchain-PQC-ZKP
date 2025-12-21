@@ -170,7 +170,7 @@ export const transferViaContract = async (
       toBankCode,
       description,
       {
-        gasLimit: 15000000, // Max gas limit for contract calls
+        gasLimit: 16000000, // Max gas limit for contract calls
         gasPrice: 0, // Free gas for private network
       }
     )
@@ -331,6 +331,18 @@ export const transferViaContract = async (
           data: error.data,
           code: error.code,
         });
+        
+        // Handle "Known transaction" error gracefully
+        const errorMessage = error.message || error.toString() || '';
+        const errorLower = errorMessage.toLowerCase();
+        
+        if (error.code === -32000 || 
+            errorLower.includes('known transaction') ||
+            errorLower.includes('already known')) {
+          console.warn('⚠️ Transaction already known to network, this is usually safe to ignore');
+          reject(new Error('Transaction đã được gửi trước đó. Vui lòng đợi transaction được xác nhận.'));
+          return;
+        }
         
         // Improve error message for common issues
         if (error.reason || error.data) {
@@ -925,7 +937,7 @@ export const transferWithPQC = async (
         signatureBytes,
         algorithm,
         {
-          gasLimit: 2000000, // Higher gas limit for PQC signature storage
+          gasLimit: 3000000, // Higher gas limit for PQC signature storage
           gasPrice: 0,
         }
       )

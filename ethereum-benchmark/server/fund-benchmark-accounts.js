@@ -38,8 +38,8 @@ function generateRandomPrivateKey() {
   return '0x' + crypto.randomBytes(32).toString('hex');
 }
 
-// Fund account
-async function fundAccount(privateKey, index) {
+// Fund account with nonce management
+async function fundAccount(privateKey, index, nonce) {
   try {
     const account = web3.eth.accounts.privateKeyToAccount(privateKey);
     const address = account.address;
@@ -53,10 +53,7 @@ async function fundAccount(privateKey, index) {
       return null;
     }
     
-    // Get nonce
-    const nonce = await web3.eth.getTransactionCount(ownerWallet.address, 'pending');
-    
-    // Create transaction
+    // Create transaction with provided nonce
     const tx = {
       from: ownerWallet.address,
       to: address,
@@ -66,16 +63,21 @@ async function fundAccount(privateKey, index) {
       nonce: nonce
     };
     
-    // Sign and send
+    // Sign and send (don't wait for receipt to speed up)
     const signedTx = await web3.eth.accounts.signTransaction(tx, OWNER_PRIVATE_KEY);
-    const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+    const txHash = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
     
-    console.log(`✅ [${index + 1}/${NUM_ACCOUNTS}] Funded ${address} with ${FUND_AMOUNT_ETH} ETH (tx: ${receipt.transactionHash.substring(0, 10)}...)`);
+    // Ensure txHash is a string
+    const txHashStr = typeof txHash === 'string' ? txHash : (txHash.transactionHash || txHash.toString());
+    const txHashShort = txHashStr.length > 10 ? txHashStr.substring(0, 10) + '...' : txHashStr;
+    
+    console.log(`✅ [${index + 1}/${NUM_ACCOUNTS}] Funded ${address} with ${FUND_AMOUNT_ETH} ETH (tx: ${txHashShort}, nonce: ${nonce})`);
     
     return {
       privateKey,
       address,
-      funded: true
+      funded: true,
+      txHash: txHashStr
     };
   } catch (error) {
     console.error(`❌ [${index + 1}/${NUM_ACCOUNTS}] Failed to fund account: ${error.message}`);
@@ -109,37 +111,130 @@ async function main() {
     process.exit(1);
   }
   
-  // Generate and fund accounts
+  // Generate and fund accounts with optimized nonce management
   const accounts = [];
   let successCount = 0;
   let failCount = 0;
   
-  console.log('🚀 Starting to fund accounts...');
+  console.log('🚀 Starting to fund accounts with optimized nonce management...');
   console.log();
   
-  for (let i = 0; i < NUM_ACCOUNTS; i++) {
-    const privateKey = generateRandomPrivateKey();
-    const result = await fundAccount(privateKey, i);
+  // Get initial nonce and wait for pending transactions
+  let currentNonce = await web3.eth.getTransactionCount(ownerWallet.address, 'pending');
+  const confirmedNonce = await web3.eth.getTransactionCount(ownerWallet.address, 'latest');
+  
+  console.log(`📌 Pending nonce: ${currentNonce}`);
+  console.log(`📌 Confirmed nonce: ${confirmedNonce}`);
+  
+  // If there are pending transactions, wait for them to be mined
+  if (currentNonce > confirmedNonce) {
+    const pendingCount = currentNonce - confirmedNonce;
+    console.log(`⏳ Waiting for ${pendingCount} pending transactions to be mined...`);
     
-    if (result) {
-      accounts.push(result);
-      successCount++;
-    } else {
-      failCount++;
+    let waitIterations = 0;
+    while (currentNonce > confirmedNonce && waitIterations < 60) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const newConfirmed = await web3.eth.getTransactionCount(ownerWallet.address, 'latest');
+      if (newConfirmed > confirmedNonce) {
+        currentNonce = newConfirmed;
+        console.log(`   ✅ Nonce updated: ${currentNonce} (${waitIterations + 1}s)`);
+        break;
+      }
+      waitIterations++;
     }
     
-    // Small delay to avoid nonce issues
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Progress update every 10 accounts
-    if ((i + 1) % 10 === 0) {
-      console.log(`📊 Progress: ${i + 1}/${NUM_ACCOUNTS} (${successCount} success, ${failCount} failed)`);
+    if (currentNonce > confirmedNonce) {
+      console.log(`⚠️  Still ${currentNonce - confirmedNonce} pending transactions. Using confirmed nonce.`);
+      currentNonce = confirmedNonce;
     }
+  }
+  
+  console.log(`📌 Final starting nonce: ${currentNonce}`);
+  console.log();
+  
+  // Batch size for parallel funding (reduce to avoid nonce congestion)
+  const BATCH_SIZE = 3; // Reduced from 5 to avoid nonce issues
+  const BATCH_DELAY = 500; // Increased delay between batches
+  
+  for (let i = 0; i < NUM_ACCOUNTS; i += BATCH_SIZE) {
+    const batchEnd = Math.min(i + BATCH_SIZE, NUM_ACCOUNTS);
+    const batchPromises = [];
+    
+    // Create batch of funding transactions
+    for (let j = i; j < batchEnd; j++) {
+      const privateKey = generateRandomPrivateKey();
+      const nonce = currentNonce + (j - i);
+      batchPromises.push(fundAccount(privateKey, j, nonce));
+    }
+    
+    // Execute batch in parallel
+    const batchResults = await Promise.allSettled(batchPromises);
+    
+    // Process results
+    batchResults.forEach((result, idx) => {
+      if (result.status === 'fulfilled' && result.value) {
+        accounts.push(result.value);
+        successCount++;
+      } else {
+        failCount++;
+      }
+    });
+    
+    // Update nonce for next batch
+    currentNonce += batchEnd - i;
+    
+    // Wait between batches to allow transactions to be mined
+    if (i + BATCH_SIZE < NUM_ACCOUNTS) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+    }
+    
+    // Progress update
+    if ((i + BATCH_SIZE) % 20 === 0 || batchEnd === NUM_ACCOUNTS) {
+      console.log(`📊 Progress: ${batchEnd}/${NUM_ACCOUNTS} (${successCount} success, ${failCount} failed, nonce: ${currentNonce})`);
+    }
+  }
+  
+  // Wait for all transactions to be mined
+  console.log();
+  console.log('⏳ Waiting for all transactions to be mined...');
+  let pendingCount = NUM_ACCOUNTS;
+  let lastPendingCount = pendingCount;
+  let waitIterations = 0;
+  
+  while (pendingCount > 0 && waitIterations < 60) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const currentPending = await web3.eth.getTransactionCount(ownerWallet.address, 'pending');
+    pendingCount = Math.max(0, currentPending - currentNonce);
+    
+    if (pendingCount !== lastPendingCount) {
+      console.log(`   ⏳ Pending transactions: ${pendingCount}`);
+      lastPendingCount = pendingCount;
+    }
+    waitIterations++;
+  }
+  
+  if (pendingCount === 0) {
+    console.log('✅ All transactions mined!');
+  } else {
+    console.log(`⚠️  ${pendingCount} transactions still pending after ${waitIterations} seconds`);
   }
   
   // Save funded accounts to file for Lacchain to use
   const { saveFundedAccounts } = require('./load-funded-accounts');
-  const fundedPrivateKeys = accounts.map(acc => Buffer.from(acc.privateKey.replace('0x', ''), 'hex'));
+  // accounts array contains objects with {privateKey, address, funded, txHash}
+  // Convert to Buffer array for saveFundedAccounts
+  const fundedPrivateKeys = accounts
+    .filter(acc => acc && acc.funded)
+    .map(acc => {
+      if (Buffer.isBuffer(acc.privateKey)) {
+        return acc.privateKey;
+      } else if (typeof acc.privateKey === 'string') {
+        const keyStr = acc.privateKey.startsWith('0x') ? acc.privateKey.slice(2) : acc.privateKey;
+        return Buffer.from(keyStr, 'hex');
+      } else {
+        return acc.privateKey; // Already a Buffer or compatible
+      }
+    });
   saveFundedAccounts(fundedPrivateKeys);
   
   console.log();
