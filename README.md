@@ -59,10 +59,11 @@ cat docs/RUNBOOK.md
 
 ---
 
-## 🔥 Top ngôn ngữ sử dụng
+## 🔥 Ngôn ngữ lập trình
 
 <p align="center">
-  <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=Quy1314&layout=compact&theme=radical&cache_seconds=1800" />
+  <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white" />
 </p>
 
 ---
