@@ -22,9 +22,13 @@ const input = {
 	language: 'Solidity',
 	sources: buildSources(),
 	settings: {
+		optimizer: {
+			enabled: true,
+			runs: 200
+		},
 		outputSelection: {
 			'*': {
-				'*': [ '*', 'evm.bytecode'  ]
+				'*': [ 'abi', 'evm.bytecode.object', 'metadata' ]
 			}
 		}
 	}

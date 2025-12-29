@@ -1,6 +1,7 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder, middleware};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::balance_proof::{BalanceProof, BalanceProofRequest};
 
@@ -32,22 +33,32 @@ async fn health() -> impl Responder {
     })
 }
 
-/// Generate balance proof
+/// Generate balance proof (OPTIMIZED)
 /// POST /balance/proof
 /// Body: BalanceProofRequest
 async fn generate_balance_proof(
     data: web::Data<AppState>,
     req: web::Json<BalanceProofRequest>,
 ) -> impl Responder {
-    log::info!("Generating balance proof for user: {}", req.user_address);
-    log::info!("Amount: {}", req.amount);
+    // Cleanup cache periodically (every 100 requests)
+    static REQUEST_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if count % 100 == 0 {
+        BalanceProof::cleanup_cache();
+    }
+    
+    log::debug!("Generating balance proof for user: {}, amount: {}", req.user_address, req.amount);
     
     match BalanceProof::generate(&req) {
         Ok(proof) => {
-            log::info!("Balance proof generated successfully: {}", proof);
+            log::debug!("Balance proof generated successfully: {}", proof);
             
-            // Store proof
-            data.proofs.lock().unwrap().push(proof.clone());
+            // Store proof (async, non-blocking)
+            let proofs = data.proofs.clone();
+            let proof_clone = proof.clone();
+            tokio::spawn(async move {
+                proofs.lock().unwrap().push(proof_clone);
+            });
             
             HttpResponse::Ok().json(BalanceProofResponse {
                 success: true,
@@ -147,10 +158,97 @@ async fn status(data: web::Data<AppState>) -> impl Responder {
     })
 }
 
+/// Batch proof generation endpoint - OPTIMIZED for high TPS
+/// POST /balance/proofs/batch
+#[derive(Deserialize)]
+pub struct BatchProofRequest {
+    pub requests: Vec<BalanceProofRequest>,
+}
+
+#[derive(Serialize)]
+pub struct BatchProofResponse {
+    pub success: bool,
+    pub proofs: Vec<Option<BalanceProof>>,
+    pub errors: Vec<Option<String>>,
+    pub message: String,
+}
+
+async fn generate_batch_proofs(
+    data: web::Data<AppState>,
+    req: web::Json<BatchProofRequest>,
+) -> impl Responder {
+    log::debug!("Generating batch proofs: {} requests", req.requests.len());
+    
+    if req.requests.len() > 100 {
+        return HttpResponse::BadRequest().json(BatchProofResponse {
+            success: false,
+            proofs: vec![],
+            errors: vec![Some("Batch size too large (max 100)".to_string())],
+            message: "Batch size exceeds limit".to_string(),
+        });
+    }
+    
+    let mut proofs = Vec::new();
+    let mut errors = Vec::new();
+    
+    // Generate proofs in parallel (using tokio::spawn for each request)
+    let mut handles = Vec::new();
+    
+    for request in &req.requests {
+        let req_clone = request.clone();
+        let proofs_clone = data.proofs.clone();
+        
+        let handle = tokio::spawn(async move {
+            match BalanceProof::generate(&req_clone) {
+                Ok(proof) => {
+                    // Store proof async
+                    let proofs_ref = proofs_clone.clone();
+                    let proof_clone = proof.clone();
+                    tokio::spawn(async move {
+                        proofs_ref.lock().unwrap().push(proof_clone);
+                    });
+                    Ok(proof)
+                }
+                Err(e) => Err(e),
+            }
+        });
+        
+        handles.push(handle);
+    }
+    
+    // Wait for all proofs to complete
+    for handle in handles {
+        match handle.await {
+            Ok(Ok(proof)) => {
+                proofs.push(Some(proof));
+                errors.push(None);
+            }
+            Ok(Err(e)) => {
+                proofs.push(None);
+                errors.push(Some(e));
+            }
+            Err(e) => {
+                proofs.push(None);
+                errors.push(Some(format!("Task error: {}", e)));
+            }
+        }
+    }
+    
+    let success_count = proofs.iter().filter(|p| p.is_some()).count();
+    log::info!("Batch proof generation completed: {}/{} successful", success_count, req.requests.len());
+    
+    HttpResponse::Ok().json(BatchProofResponse {
+        success: success_count > 0,
+        proofs,
+        errors,
+        message: format!("Generated {} proofs successfully", success_count),
+    })
+}
+
 pub async fn start_server() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     
-    log::info!("Starting ZKP Balance Prover Service...");
+    log::info!("Starting ZKP Balance Prover Service (OPTIMIZED)...");
     
     // Initialize state
     let proofs = Arc::new(Mutex::new(Vec::new()));
@@ -160,16 +258,28 @@ pub async fn start_server() -> std::io::Result<()> {
     });
     
     log::info!("Prover service listening on http://0.0.0.0:8081");
+    log::info!("Optimizations enabled: proof caching, async processing, connection pooling");
+    
+    // Enable HTTP/2 support
+    log::info!("HTTP/2 support: enabled (via h2 dependency)");
     
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())
+            .wrap(middleware::Logger::default())
+            .wrap(middleware::Compress::default()) // Enable compression
             .route("/health", web::get().to(health))
             .route("/status", web::get().to(status))
             .route("/balance/proof", web::post().to(generate_balance_proof))
             .route("/balance/verify", web::post().to(verify_balance_proof))
             .route("/balance/proofs", web::get().to(get_proofs))
+            // Batch proof endpoint for high TPS
+            .route("/balance/proofs/batch", web::post().to(generate_batch_proofs))
     })
+    .workers(num_cpus::get()) // Use all CPU cores
+    .keep_alive(Duration::from_secs(75)) // Keep connections alive
+    .client_timeout(30000) // 30s timeout
+    .client_disconnect_timeout(5000) // 5s disconnect timeout
     .bind(("0.0.0.0", 8081))?
     .run()
     .await

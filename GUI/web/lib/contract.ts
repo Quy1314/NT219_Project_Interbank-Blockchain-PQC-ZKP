@@ -5,6 +5,7 @@ import { vndToWei, weiToVnd } from '@/config/blockchain';
 import { INTERBANK_TRANSFER_ABI, INTERBANK_TRANSFER_ADDRESS } from '@/config/contracts';
 import { getZKPClient, BalanceProof } from './zkp-client';
 import { getKSMClient } from './ksm-client';
+import { getNonce, markTransactionConfirmed, resetNonce } from './nonce-manager';
 
 // Contract instance cache
 let contractInstance: ethers.Contract | null = null;
@@ -60,6 +61,16 @@ export const getContractWithSigner = (privateKey: string): ethers.Contract => {
   const provider = getProvider();
   const wallet = new ethers.Wallet(privateKey, provider);
   return new ethers.Contract(INTERBANK_TRANSFER_ADDRESS, INTERBANK_TRANSFER_ABI, wallet);
+};
+
+/**
+ * Get contract address
+ */
+export const getContractAddress = (): string => {
+  if (!INTERBANK_TRANSFER_ADDRESS) {
+    throw new Error('Contract address not set');
+  }
+  return INTERBANK_TRANSFER_ADDRESS;
 };
 
 /**
@@ -162,17 +173,36 @@ export const transferViaContract = async (
   // Get contract with signer for transfer
   const contract = getContractWithSigner(fromPrivateKey);
   
+  // Get nonce using nonce manager
+  let txNonce: number;
+  try {
+    txNonce = await getNonce(senderAddress, true); // Increment nonce
+    console.log(`📝 Using nonce ${txNonce} for transfer from ${senderAddress}`);
+  } catch (error: any) {
+    console.error('❌ Failed to get nonce:', error);
+    // Fallback: let ethers handle nonce automatically
+    console.warn('⚠️ Falling back to automatic nonce management');
+    txNonce = undefined as any;
+  }
+  
   // Call the transfer function using promise chain (similar to TransferQuorumToken pattern)
   return new Promise<{ txHash: string; txId: bigint }>((resolve, reject) => {
+    const txOptions: any = {
+      gasLimit: 16000000, // Max gas limit for contract calls
+      gasPrice: 0, // Free gas for private network
+    };
+    
+    // Add nonce if we got it from nonce manager
+    if (txNonce !== undefined) {
+      txOptions.nonce = txNonce;
+    }
+    
     contract.transfer(
       toAddress,
       amountWei,
       toBankCode,
       description,
-      {
-        gasLimit: 16000000, // Max gas limit for contract calls
-        gasPrice: 0, // Free gas for private network
-      }
+      txOptions
     )
       .then(async (tx: ethers.ContractTransactionResponse) => {
         // In ethers v6, ContractTransactionResponse.hash might not be available immediately
@@ -298,6 +328,11 @@ export const transferViaContract = async (
 
           console.log('✅ Transfer successful:', { txHash: finalTxHash, txId: txId.toString() });
 
+          // Mark transaction as confirmed in nonce manager
+          if (txNonce !== undefined) {
+            markTransactionConfirmed(senderAddress, txNonce);
+          }
+
           // Resolve with hash from receipt
           resolve({
             txHash: finalTxHash as string,
@@ -310,6 +345,11 @@ export const transferViaContract = async (
             stack: waitError.stack,
             name: waitError.name,
           });
+          
+          // Reset nonce on error
+          if (txNonce !== undefined) {
+            resetNonce(senderAddress);
+          }
           
           // If we can't get receipt but have a hash from tx, still resolve
           if (txHash) {
@@ -332,9 +372,24 @@ export const transferViaContract = async (
           code: error.code,
         });
         
+        // Reset nonce on error
+        if (txNonce !== undefined) {
+          resetNonce(senderAddress);
+        }
+        
         // Handle "Known transaction" error gracefully
         const errorMessage = error.message || error.toString() || '';
         const errorLower = errorMessage.toLowerCase();
+        
+        // Handle nonce errors
+        if (error.code === 'NONCE_EXPIRED' || 
+            error.code === -32001 ||
+            errorLower.includes('nonce') && (errorLower.includes('too low') || errorLower.includes('already been used'))) {
+          console.warn('⚠️ Nonce error detected, resetting nonce cache');
+          resetNonce(senderAddress);
+          reject(new Error('Nonce đã được sử dụng. Vui lòng thử lại sau vài giây.'));
+          return;
+        }
         
         if (error.code === -32000 || 
             errorLower.includes('known transaction') ||
@@ -471,9 +526,30 @@ export const transferWithZKP = async (
   // Get contract with signer for transfer
   const contract = getContractWithSigner(fromPrivateKey);
   
+  // Get nonce using nonce manager
+  let txNonce: number;
+  try {
+    txNonce = await getNonce(senderAddress, true); // Increment nonce
+    console.log(`📝 Using nonce ${txNonce} for ZKP transfer from ${senderAddress}`);
+  } catch (error: any) {
+    console.error('❌ Failed to get nonce:', error);
+    console.warn('⚠️ Falling back to automatic nonce management');
+    txNonce = undefined as any;
+  }
+  
   // Call transferWithZKP if ZKP is enabled, otherwise use regular transfer
   if (useZKP && proofBytes !== '0x') {
     return new Promise<{ txHash: string; txId: bigint }>((resolve, reject) => {
+      const txOptions: any = {
+        gasLimit: 15000000,
+        gasPrice: 0,
+      };
+      
+      // Add nonce if we got it from nonce manager
+      if (txNonce !== undefined) {
+        txOptions.nonce = txNonce;
+      }
+      
       contract.transferWithZKP(
         toAddress,
         amountWei,
@@ -482,10 +558,7 @@ export const transferWithZKP = async (
         amountWei, // proofAmount
         commitmentHash,
         proofBytes,
-        {
-          gasLimit: 15000000,
-          gasPrice: 0,
-        }
+        txOptions
       )
         .then(async (tx: ethers.ContractTransactionResponse) => {
           console.log('📤 ZKP Transaction sent, waiting for receipt...');
@@ -529,17 +602,47 @@ export const transferWithZKP = async (
             }
 
             console.log('✅ ZKP Transaction confirmed:', finalTxHash);
+            
+            // Mark transaction as confirmed in nonce manager
+            if (txNonce !== undefined) {
+              markTransactionConfirmed(senderAddress, txNonce);
+            }
+            
             resolve({
               txHash: finalTxHash,
               txId,
             });
           } catch (waitError: any) {
             console.error('❌ Error waiting for transaction receipt:', waitError);
+            
+            // Reset nonce on error
+            if (txNonce !== undefined) {
+              resetNonce(senderAddress);
+            }
+            
             reject(new Error(`Không thể lấy transaction hash: ${waitError.message || 'Unknown error'}`));
           }
         })
         .catch((error: any) => {
           console.error('Error transferring with ZKP:', error);
+          
+          // Reset nonce on error
+          if (txNonce !== undefined) {
+            resetNonce(senderAddress);
+          }
+          
+          // Handle nonce errors
+          const errorMessage = error.message || error.toString() || '';
+          const errorLower = errorMessage.toLowerCase();
+          if (error.code === 'NONCE_EXPIRED' || 
+              error.code === -32001 ||
+              errorLower.includes('nonce') && (errorLower.includes('too low') || errorLower.includes('already been used'))) {
+            console.warn('⚠️ Nonce error detected, resetting nonce cache');
+            resetNonce(senderAddress);
+            reject(new Error('Nonce đã được sử dụng. Vui lòng thử lại sau vài giây.'));
+            return;
+          }
+          
           if (error.reason || error.data) {
             const reason = error.reason || 'Transaction reverted';
             reject(new Error(`Lỗi từ contract: ${reason}`));
@@ -609,15 +712,33 @@ export const withdrawViaContract = async (
   // Get contract with signer for withdraw
   const contract = getContractWithSigner(fromPrivateKey);
   
+  // Get nonce using nonce manager
+  let txNonce: number;
+  try {
+    txNonce = await getNonce(senderAddress, true); // Increment nonce
+    console.log(`📝 Using nonce ${txNonce} for withdraw from ${senderAddress}`);
+  } catch (error: any) {
+    console.error('❌ Failed to get nonce:', error);
+    console.warn('⚠️ Falling back to automatic nonce management');
+    txNonce = undefined as any;
+  }
+  
   // Call the withdraw function
   try {
+    const txOptions: any = {
+      gasLimit: 15000000,
+      gasPrice: 0,
+    };
+    
+    // Add nonce if we got it from nonce manager
+    if (txNonce !== undefined) {
+      txOptions.nonce = txNonce;
+    }
+    
     const tx = await contract.withdraw(
       amountWei,
       description,
-      {
-        gasLimit: 15000000,
-        gasPrice: 0,
-      }
+      txOptions
     );
 
     // Get transaction hash immediately (available right after sending)
@@ -680,12 +801,33 @@ export const withdrawViaContract = async (
 
     console.log('✅ Withdraw successful:', { txHash, txId: txId.toString() });
 
+    // Mark transaction as confirmed in nonce manager
+    if (txNonce !== undefined) {
+      markTransactionConfirmed(senderAddress, txNonce);
+    }
+
     return {
       txHash: txHash as string,
       txId,
     };
   } catch (error: any) {
     console.error('Error withdrawing via contract:', error);
+    
+    // Reset nonce on error
+    if (txNonce !== undefined) {
+      resetNonce(senderAddress);
+    }
+    
+    // Handle nonce errors
+    const errorMessage = error.message || error.toString() || '';
+    const errorLower = errorMessage.toLowerCase();
+    if (error.code === 'NONCE_EXPIRED' || 
+        error.code === -32001 ||
+        errorLower.includes('nonce') && (errorLower.includes('too low') || errorLower.includes('already been used'))) {
+      console.warn('⚠️ Nonce error detected, resetting nonce cache');
+      resetNonce(senderAddress);
+      throw new Error('Nonce đã được sử dụng. Vui lòng thử lại sau vài giây.');
+    }
     
     if (error.reason || error.data) {
       const reason = error.reason || 'Transaction reverted';

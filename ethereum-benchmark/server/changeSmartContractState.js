@@ -163,11 +163,16 @@ const setInterbankTransfer = () => {
   }
   
   const contract = new web3.eth.Contract(InterbankTransferABI, contractAddress)
-  const toAddress = process.env.TO_ADDRESS || '0x0000000000000000000000000000000000000001'
+  const fundedAccounts = require('./funded-accounts.json')
+  // Use a fixed recipient from funded accounts (index 1 to avoid self-transfer)
+  const recipientIndex = 1 % fundedAccounts.length
+  const toAddress = fundedAccounts[recipientIndex].address
   const amount = process.env.AMOUNT_WEI || web3.utils.toWei('0.001', 'ether')
   const toBankCode = process.env.TO_BANK_CODE || 'VCB'
   const description = `Lacchain benchmark transfer at ${Date.now()}`
   
+  // Use single transfer instead of batchTransfer for now
+  // This avoids "Stack too deep" and other batch-related issues
   const txData = contract.methods.transfer(
     toAddress,
     amount,

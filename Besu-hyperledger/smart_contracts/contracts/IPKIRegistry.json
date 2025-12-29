@@ -81,51 +81,10 @@
       "type": "function"
     }
   ],
-  "devdoc": {
-    "details": "Interface for PKIRegistry contract",
-    "kind": "dev",
-    "methods": {},
-    "version": 1
-  },
   "evm": {
-    "assembly": "",
     "bytecode": {
-      "functionDebugData": {},
-      "generatedSources": [],
-      "linkReferences": {},
-      "object": "",
-      "opcodes": "",
-      "sourceMap": ""
-    },
-    "deployedBytecode": {
-      "functionDebugData": {},
-      "generatedSources": [],
-      "immutableReferences": {},
-      "linkReferences": {},
-      "object": "",
-      "opcodes": "",
-      "sourceMap": ""
-    },
-    "gasEstimates": null,
-    "legacyAssembly": null,
-    "methodIdentifiers": {
-      "canUserTransfer(address,uint256)": "76031448",
-      "getUserPublicKey(address)": "11231fe0",
-      "isKYCValid(address)": "cf0e0f9d",
-      "recordTransfer(address,uint256)": "73ac83ef"
+      "object": ""
     }
   },
-  "ewasm": {
-    "wasm": ""
-  },
-  "metadata": "{\"compiler\":{\"version\":\"0.8.10+commit.fc410830\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"canUserTransfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"}],\"name\":\"getUserPublicKey\",\"outputs\":[{\"internalType\":\"bytes\",\"name\":\"\",\"type\":\"bytes\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"}],\"name\":\"isKYCValid\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"recordTransfer\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"details\":\"Interface for PKIRegistry contract\",\"kind\":\"dev\",\"methods\":{},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"InterbankTransfer.sol\":\"IPKIRegistry\"},\"evmVersion\":\"london\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":false,\"runs\":200},\"remappings\":[]},\"sources\":{\"InterbankTransfer.sol\":{\"keccak256\":\"0x91a5ea8a84d3b7351175b09b1610cebf902805655bc7f2a76d759bb427b0ae16\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://78b4d21a588001b26b789d95576d85c8d03b2d1f0f17b0cc7e677aa2b16adc7e\",\"dweb:/ipfs/QmRwBRP2eWAuoSjXamMK3VQJv9NEX1wBez3toqtBc18BAu\"]}},\"version\":1}",
-  "storageLayout": {
-    "storage": [],
-    "types": null
-  },
-  "userdoc": {
-    "kind": "user",
-    "methods": {},
-    "version": 1
-  }
+  "metadata": "{\"compiler\":{\"version\":\"0.8.10+commit.fc410830\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"canUserTransfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"}],\"name\":\"getUserPublicKey\",\"outputs\":[{\"internalType\":\"bytes\",\"name\":\"\",\"type\":\"bytes\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"}],\"name\":\"isKYCValid\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_user\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"recordTransfer\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"details\":\"Interface for PKIRegistry contract\",\"kind\":\"dev\",\"methods\":{},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"InterbankTransfer.sol\":\"IPKIRegistry\"},\"evmVersion\":\"london\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[]},\"sources\":{\"InterbankTransfer.sol\":{\"keccak256\":\"0x875171fb80778c1e99e35a01218128a9223855072d19b9aefcbafa69b3915144\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://4a5840b9fb9ee6f4126931cd43d70b63979d9fff9b799b8749a2b9dd69704133\",\"dweb:/ipfs/QmXvBpER3Mmvzvvyu3Vdy9UZU4b334GQH77RFE2SAYXy5z\"]}},\"version\":1}"
 }

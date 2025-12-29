@@ -10,10 +10,10 @@ services:
     environment:
       - TEST_TYPE=1 # Smart contract test
       - SMART_CONTRACT_OPTION=5 # InterbankTransfer test
-      - DESIRED_RATE_TX=20
+      - DESIRED_RATE_TX=1
       - TEST_TIME_MINUTES=2
       - RPC_URL=https://localhost:21001 # Besu RPC endpoint
-      - MAX_GAS_PER_TX=300000 # Gas limit for transfer
+      - MAX_GAS_PER_TX=16000000 # Gas limit for batch transfer (increased from 300000)
       - NUMBER_OF_CONTAINERS=1
       - STORE_DATA=TRUE
       - NODE_TLS_REJECT_UNAUTHORIZED=0 # For self-signed certificates
@@ -24,5 +24,6 @@ services:
       - TO_ADDRESS=0x0000000000000000000000000000000000000001
       - AMOUNT_WEI=1000000000000000 # 0.001 ETH
       - TO_BANK_CODE=VCB
+      - BATCH_SIZE=10 # Batch size for batchTransfer (10 transfers per transaction)
     network_mode: host # Using localhost instead of isolated network
 

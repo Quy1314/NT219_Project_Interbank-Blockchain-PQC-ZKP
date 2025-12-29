@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getContract } from '@/lib/blockchain';
 import { PKI_REGISTRY_ADDRESS } from '@/config/contracts';
 import PKIRegistryABI from '@/config/abis/PKIRegistry.json';

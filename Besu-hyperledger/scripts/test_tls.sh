@@ -127,6 +127,7 @@ test_tls_connection() {
     # Check if rpcnode is running
     if ! docker ps --format '{{.Names}}' | grep -q "rpcnode"; then
         log_warn "rpcnode is not running. Skipping TLS connection test."
+        log_warn "Start nodes with: docker-compose up -d"
         return 0
     fi
     
@@ -141,6 +142,14 @@ test_tls_connection() {
     output=$(echo "Q" | timeout 5 openssl s_client -connect localhost:8545 \
         -tls1_3 \
         -CAfile "$CA_CERT" 2>&1 || true)
+    
+    # Check for connection errors first
+    if echo "$output" | grep -qi "Connection refused\|connect:errno"; then
+        log_error "Cannot connect to localhost:8545"
+        log_warn "Node may not be listening on this port or TLS may not be enabled"
+        log_warn "Check node logs: docker logs rpcnode | grep -i tls"
+        return 1
+    fi
     
     if echo "$output" | grep -q "Verify return code: 0 (ok)"; then
         log_info "TLS connection successful!"
@@ -157,6 +166,14 @@ test_tls_connection() {
             cipher=$(echo "$output" | grep -i "Cipher is" | head -1 | sed -n 's/.*Cipher is[[:space:]]*\([^[:space:]]*\).*/\1/p')
         fi
         
+        # Try to get from handshake info
+        if [ -z "$protocol" ]; then
+            protocol=$(echo "$output" | grep -i "Protocol.*TLS" | head -1 | sed -n 's/.*\(TLSv[0-9.]*\).*/\1/p')
+        fi
+        if [ -z "$cipher" ]; then
+            cipher=$(echo "$output" | grep -i "Cipher.*:" | head -1 | sed -n 's/.*Cipher.*:[[:space:]]*\([^[:space:]]*\).*/\1/p')
+        fi
+        
         echo ""
         echo "Connection Details:"
         echo "  Protocol: ${protocol:-unknown}"
@@ -170,6 +187,7 @@ test_tls_connection() {
             log_error "Not using TLS 1.3! Current: $protocol"
         else
             log_warn "Could not determine TLS protocol version"
+            log_warn "This may indicate TLS is not enabled or connection failed"
         fi
         
         if echo "$cipher" | grep -qi "AES.*GCM\|TLS_AES"; then
@@ -185,9 +203,13 @@ test_tls_connection() {
         log_error "TLS connection failed!"
         echo ""
         echo "Error details:"
-        echo "$output" | grep -E "error|verify|SSL" | sed 's/^/  /'
+        echo "$output" | grep -E "error|verify|SSL|handshake" | head -10 | sed 's/^/  /'
         echo ""
-        log_warn "Make sure TLS is enabled in node configuration"
+        log_warn "Possible causes:"
+        log_warn "  1. TLS may not be enabled in node configuration"
+        log_warn "  2. Certificate files may not be accessible in container"
+        log_warn "  3. Node may not be fully started yet"
+        log_warn "Check: docker logs rpcnode | grep -i 'tls\|config-tls'"
         return 1
     fi
 }
@@ -200,29 +222,72 @@ test_jsonrpc_tls() {
     
     if ! docker ps --format '{{.Names}}' | grep -q "rpcnode"; then
         log_warn "rpcnode is not running. Skipping JSON-RPC test."
+        log_warn "Start nodes with: docker-compose up -d"
         return 0
     fi
     
     # Wait a bit for node to be ready
     sleep 2
     
+    # Check curl version and TLS 1.3 support
+    local curl_version=$(curl --version | head -1 | grep -oE 'curl [0-9]+\.[0-9]+' | cut -d' ' -f2)
+    local curl_major=$(echo "$curl_version" | cut -d'.' -f1)
+    local curl_minor=$(echo "$curl_version" | cut -d'.' -f2)
+    local tls13_supported=false
+    
+    if [ -n "$curl_major" ] && [ -n "$curl_minor" ]; then
+        if [ "$curl_major" -gt 7 ] || ([ "$curl_major" -eq 7 ] && [ "$curl_minor" -ge 52 ]); then
+            tls13_supported=true
+        fi
+    fi
+    
     # Test eth_blockNumber on rpcnode (port 8545)
     echo ""
     echo "Testing JSON-RPC on localhost:8545 (rpcnode)..."
+    echo "Curl version: $curl_version (TLS 1.3 support: $tls13_supported)"
+    
     local response
     local curl_error
-    response=$(curl -s --cacert "$CA_CERT" \
-        --tlsv1.3 \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-        https://localhost:8545 2>&1)
-    curl_error=$?
+    
+    # Try with TLS 1.3 if supported, otherwise use default
+    if [ "$tls13_supported" = "true" ]; then
+        response=$(curl -s --cacert "$CA_CERT" \
+            --tlsv1.3 \
+            --tls-max 1.3 \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+            https://localhost:8545 2>&1)
+        curl_error=$?
+    else
+        # Fallback: try without explicit TLS version (will negotiate)
+        log_warn "Curl version may not support --tlsv1.3 flag, trying without it..."
+        response=$(curl -s --cacert "$CA_CERT" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+            https://localhost:8545 2>&1)
+        curl_error=$?
+    fi
     
     if [ $curl_error -ne 0 ]; then
         log_error "JSON-RPC request failed (curl error: $curl_error)!"
-        echo "Response: $response"
         echo ""
+        echo "Error details:"
+        echo "$response" | head -5
+        echo ""
+        
+        # Provide specific troubleshooting based on error
+        if echo "$response" | grep -qi "SSL\|certificate\|verify"; then
+            log_warn "SSL/Certificate issue detected. Possible causes:"
+            log_warn "  1. Node may not be using TLS (check if config-tls.toml exists)"
+            log_warn "  2. Certificate path may be incorrect"
+            log_warn "  3. Node may not be fully started yet"
+        elif echo "$response" | grep -qi "Connection refused\|Couldn't connect"; then
+            log_warn "Connection refused. Node may not be listening on port 8545"
+            log_warn "Check node logs: docker logs rpcnode"
+        fi
+        
         log_warn "Note: If rpcnode is not accessible, try testing sbv node on port 21001"
         return 1
     fi
@@ -248,30 +313,74 @@ test_jsonrpc_tls() {
 test_jsonrpc_sbv() {
     log_test "Testing JSON-RPC over TLS on sbv node (port 21001)..."
     
-    if ! docker ps --format '{{.Names}}' | grep -q "besu-hyperledger-sbv"; then
+    if ! docker ps --format '{{.Names}}' | grep -q "besu-hyperledger-sbv\|^sbv$"; then
         log_warn "sbv node is not running. Skipping sbv JSON-RPC test."
+        log_warn "Start nodes with: docker-compose up -d"
         return 0
     fi
     
     # Wait a bit for node to be ready
     sleep 2
     
+    # Check curl version and TLS 1.3 support
+    local curl_version=$(curl --version | head -1 | grep -oE 'curl [0-9]+\.[0-9]+' | cut -d' ' -f2)
+    local curl_major=$(echo "$curl_version" | cut -d'.' -f1)
+    local curl_minor=$(echo "$curl_version" | cut -d'.' -f2)
+    local tls13_supported=false
+    
+    if [ -n "$curl_major" ] && [ -n "$curl_minor" ]; then
+        if [ "$curl_major" -gt 7 ] || ([ "$curl_major" -eq 7 ] && [ "$curl_minor" -ge 52 ]); then
+            tls13_supported=true
+        fi
+    fi
+    
     # Test eth_blockNumber on sbv (port 21001)
     echo ""
     echo "Testing JSON-RPC on localhost:21001 (sbv)..."
+    echo "Curl version: $curl_version (TLS 1.3 support: $tls13_supported)"
+    
     local response
     local curl_error
-    response=$(curl -s --cacert "$CA_CERT" \
-        --tlsv1.3 \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-        https://localhost:21001 2>&1)
-    curl_error=$?
+    
+    # Try with TLS 1.3 if supported, otherwise use default
+    if [ "$tls13_supported" = "true" ]; then
+        response=$(curl -s --cacert "$CA_CERT" \
+            --tlsv1.3 \
+            --tls-max 1.3 \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+            https://localhost:21001 2>&1)
+        curl_error=$?
+    else
+        # Fallback: try without explicit TLS version (will negotiate)
+        log_warn "Curl version may not support --tlsv1.3 flag, trying without it..."
+        response=$(curl -s --cacert "$CA_CERT" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+            https://localhost:21001 2>&1)
+        curl_error=$?
+    fi
     
     if [ $curl_error -ne 0 ]; then
         log_error "JSON-RPC request failed (curl error: $curl_error)!"
-        echo "Response: $response"
+        echo ""
+        echo "Error details:"
+        echo "$response" | head -5
+        echo ""
+        
+        # Provide specific troubleshooting based on error
+        if echo "$response" | grep -qi "SSL\|certificate\|verify"; then
+            log_warn "SSL/Certificate issue detected. Possible causes:"
+            log_warn "  1. Node may not be using TLS (check if config-tls.toml exists)"
+            log_warn "  2. Certificate path may be incorrect"
+            log_warn "  3. Node may not be fully started yet"
+        elif echo "$response" | grep -qi "Connection refused\|Couldn't connect"; then
+            log_warn "Connection refused. Node may not be listening on port 21001"
+            log_warn "Check node logs: docker logs sbv"
+        fi
+        
         return 1
     fi
     

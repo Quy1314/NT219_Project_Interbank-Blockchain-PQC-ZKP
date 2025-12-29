@@ -14,6 +14,26 @@ export const getUserTransactionsKey = (bankCode: string, address: string): strin
   return `${STORAGE_KEYS.TRANSACTIONS_PREFIX}${bankCode.toLowerCase()}_${address.toLowerCase()}`;
 };
 
+/**
+ * Find bank code for a given address
+ */
+export const findBankCodeByAddress = (address: string): string | null => {
+  // Import here to avoid circular dependency
+  const { getAllUsers, BANKS } = require('@/config/banks');
+  const allUsers = getAllUsers();
+  const user = allUsers.find((u: any) => u.address.toLowerCase() === address.toLowerCase());
+  if (user) {
+    // Find bank code by searching through all banks
+    for (const bank of BANKS) {
+      const foundUser = bank.users.find((u: any) => u.id === user.id);
+      if (foundUser) {
+        return bank.code;
+      }
+    }
+  }
+  return null;
+};
+
 export const saveTransaction = (transaction: Transaction, bankCode: string, userAddress: string): void => {
   const userKey = getUserTransactionsKey(bankCode, userAddress);
   const transactions = getTransactionsByUser(bankCode, userAddress);
@@ -82,26 +102,6 @@ export const getTransactionsByUser = (bankCode: string, address: string): Transa
   } catch {
     return [];
   }
-};
-
-/**
- * Find bank code for a given address
- */
-export const findBankCodeByAddress = (address: string): string | null => {
-  // Import here to avoid circular dependency
-  const { getAllUsers, BANKS } = require('@/config/banks');
-  const allUsers = getAllUsers();
-  const user = allUsers.find((u: any) => u.address.toLowerCase() === address.toLowerCase());
-  if (user) {
-    // Find bank code by searching through all banks
-    for (const bank of BANKS) {
-      const foundUser = bank.users.find((u: any) => u.id === user.id);
-      if (foundUser) {
-        return bank.code;
-      }
-    }
-  }
-  return null;
 };
 
 export const deleteTransactionsByUser = (bankCode: string, address: string): void => {
