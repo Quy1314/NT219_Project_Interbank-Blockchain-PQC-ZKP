@@ -17,7 +17,14 @@
 
 Hệ thống blockchain liên ngân hàng với bảo mật hậu lượng tử và Zero-Knowledge Proofs.
 
-**Vai trò của tôi trong dự án:**
+<p align="center">
+  <img src="https://img.shields.io/badge/Blockchain-Hyperledger%20Besu-2F3134?style=for-the-badge&logo=hyperledger&logoColor=white" />
+  <img src="https://img.shields.io/badge/Cryptography-PQC%20%2B%20ZKP-FF6B6B?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/TLS-1.3-4ECDC4?style=for-the-badge" />
+</p>
+
+### 👤 Vai trò của tôi trong dự án
+
 - 🏗️ **Thiết kế hệ thống**: Phân tích yêu cầu, thiết kế kiến trúc tổng thể và luồng xử lý
 - 🔐 **Triển khai CA & PKI**: Xây dựng Certificate Authority, cấu hình TLS 1.3, quản lý PKI Registry
 - 🔍 **Phân tích ngữ cảnh**: Xác định vấn đề bảo mật, đánh giá rủi ro và đề xuất giải pháp
@@ -42,7 +49,9 @@ Hệ thống blockchain liên ngân hàng với bảo mật hậu lượng tử 
 
 ### 📚 Tài liệu
 
-Xem [docs/RUNBOOK.md](./docs/RUNBOOK.md) để xem hướng dẫn triển khai đầy đủ.
+- 📖 [RUNBOOK.md](./docs/RUNBOOK.md) - Hướng dẫn triển khai đầy đủ
+- 📄 [Architecture Documentation](./docs/architecture/) - Tài liệu kiến trúc hệ thống
+- 🚀 [Deployment Guides](./docs/deployment/) - Hướng dẫn triển khai từng module
 
 ### 🚀 Quick Start
 
@@ -100,7 +109,25 @@ cat docs/RUNBOOK.md
 
 ---
 
+---
+
+## 📊 Project Statistics
+
+<p align="center">
+  <img src="https://img.shields.io/github/repo-size/Quy1314/NT219_Project_Interbank-Blockchain-PQC-ZKP?style=for-the-badge" />
+  <img src="https://img.shields.io/github/languages/count/Quy1314/NT219_Project_Interbank-Blockchain-PQC-ZKP?style=for-the-badge" />
+  <img src="https://img.shields.io/github/commit-activity/m/Quy1314/NT219_Project_Interbank-Blockchain-PQC-ZKP?style=for-the-badge" />
+</p>
+
+---
+
 ## 📄 License
 
 This project is part of academic research and development work.
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/Quy1314">Quý</a>
+</p>
 
