@@ -1,9 +1,4 @@
 <h2 align="center">👋 Xin chào, mình là Quý</h2>
-
-<p align="center">
-  🏗️ Thiết kế hệ thống • 🔐 Triển khai CA & PKI • 🔍 Phân tích & Giải quyết vấn đề  
-</p>
-
 ---
 
 ## 📫 Liên hệ
