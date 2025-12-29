@@ -1,7 +1,7 @@
 <h2 align="center">👋 Xin chào, mình là Quý</h2>
 
 <p align="center">
-  💻 Yêu thích lập trình • 🚀 Khám phá GitHub • 🌱 Học hỏi mỗi ngày  
+  🏗️ Thiết kế hệ thống • 🔐 Triển khai CA & PKI • 🔍 Phân tích & Giải quyết vấn đề  
 </p>
 
 ---
@@ -16,6 +16,12 @@
 ## 🏦 Quantum-Safe Interbank Blockchain System
 
 Hệ thống blockchain liên ngân hàng với bảo mật hậu lượng tử và Zero-Knowledge Proofs.
+
+**Vai trò của tôi trong dự án:**
+- 🏗️ **Thiết kế hệ thống**: Phân tích yêu cầu, thiết kế kiến trúc tổng thể và luồng xử lý
+- 🔐 **Triển khai CA & PKI**: Xây dựng Certificate Authority, cấu hình TLS 1.3, quản lý PKI Registry
+- 🔍 **Phân tích ngữ cảnh**: Xác định vấn đề bảo mật, đánh giá rủi ro và đề xuất giải pháp
+- 📋 **Quản lý triển khai**: Lập kế hoạch, tài liệu hóa và hướng dẫn triển khai hệ thống
 
 ### ✨ Tính năng chính
 
