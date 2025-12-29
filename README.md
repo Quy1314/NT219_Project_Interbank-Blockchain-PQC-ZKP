@@ -28,13 +28,6 @@ Hệ thống blockchain liên ngân hàng với bảo mật hậu lượng tử 
 ---
 
 ## 📚 Tài liệu
-
-<p align="center">
-  <a href="./docs/RUNBOOK.md">
-    <img src="https://img.shields.io/badge/📖-Xem%20RUNBOOK%20để%20xem%20hướng%20dẫn%20triển%20khai%20đầy%20đủ-FF6B6B?style=for-the-badge" />
-  </a>
-</p>
-
 <p align="center">
   <strong>👉 <a href="./docs/RUNBOOK.md">Xem RUNBOOK.md để xem hướng dẫn triển khai đầy đủ →</a></strong>
 </p>
