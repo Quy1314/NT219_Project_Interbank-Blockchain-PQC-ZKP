@@ -1,4 +1,4 @@
 # 📚 Tài liệu dự án
 
-Xem [INDEX.md](./INDEX.md) để xem danh sách đầy đủ tài liệu.
+Xem [RUNBOOK.md](./RUNBOOK.md) để xem danh sách đầy đủ tài liệu.
 
