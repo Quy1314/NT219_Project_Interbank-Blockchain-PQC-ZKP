@@ -49,6 +49,8 @@ Hệ thống blockchain liên ngân hàng với bảo mật hậu lượng tử 
 
 ### 📚 Tài liệu
 
+**👉 [Xem RUNBOOK.md để xem hướng dẫn triển khai đầy đủ →](./docs/RUNBOOK.md)**
+
 - 📖 [RUNBOOK.md](./docs/RUNBOOK.md) - Hướng dẫn triển khai đầy đủ
 - 📄 [Architecture Documentation](./docs/architecture/) - Tài liệu kiến trúc hệ thống
 - 🚀 [Deployment Guides](./docs/deployment/) - Hướng dẫn triển khai từng module
@@ -59,10 +61,9 @@ Hệ thống blockchain liên ngân hàng với bảo mật hậu lượng tử 
 # Clone repository
 git clone https://github.com/Quy1314/NT219_Project_Interbank-Blockchain-PQC-ZKP.git
 cd NT219_Project_Interbank-Blockchain-PQC-ZKP
-
-# Xem hướng dẫn chi tiết
-cat docs/RUNBOOK.md
 ```
+
+**📖 Xem [RUNBOOK.md](./docs/RUNBOOK.md) để xem hướng dẫn triển khai chi tiết**
 
 ---
 
