@@ -42,8 +42,8 @@ Xem [docs/RUNBOOK.md](./docs/RUNBOOK.md) để xem hướng dẫn triển khai �
 
 ```bash
 # Clone repository
-git clone https://github.com/Quy1314/NT219_Project.git
-cd NT219_Project
+git clone https://github.com/Quy1314/NT219_Project_Interbank-Blockchain-PQC-ZKP.git
+cd NT219_Project_Interbank-Blockchain-PQC-ZKP
 
 # Xem hướng dẫn chi tiết
 cat docs/RUNBOOK.md
@@ -70,11 +70,8 @@ cat docs/RUNBOOK.md
 ## 🚀 Các project nổi bật
 
 <p align="center">
-  <a href="https://github.com/Quy1314/Self_Project">
-    <img src="https://github-readme-stats.vercel.app/api/pin/?username=Quy1314&repo=Self_Project&theme=radical" />
-  </a>
-  <a href="https://github.com/Quy1314/NT219_Project">
-    <img src="https://github-readme-stats.vercel.app/api/pin/?username=Quy1314&repo=NT219_Project&theme=radical" />
+  <a href="https://github.com/Quy1314/NT219_Project_Interbank-Blockchain-PQC-ZKP">
+    <img src="https://github-readme-stats.vercel.app/api/pin/?username=Quy1314&repo=NT219_Project_Interbank-Blockchain-PQC-ZKP&theme=radical" />
   </a>
 </p>
 
